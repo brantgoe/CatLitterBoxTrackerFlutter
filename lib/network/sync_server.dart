@@ -116,8 +116,8 @@ class SyncServer {
             }
           } else if (type == MsgType.delete) {
             final kind = EntityKindCodec.parse(m['entity'] as String);
-            final id = (m['id'] as num).toInt();
-            await _applier.applyDelete(kind, id);
+            final syncId = m['syncId'] as String;
+            await _applier.applyDelete(kind, syncId);
             final origin = m['originDeviceId'] as String?;
             _broadcastRaw(jsonEncode(m), exceptDeviceId: origin);
           } else if (type == MsgType.ping) {
@@ -145,11 +145,24 @@ class SyncServer {
     final boxes = await db.allBoxesOnce();
     final events = await db.allEventsOnce();
     final tasks = await db.allTasksOnce();
+    final roomSyncById = {for (final r in rooms) r.id: r.syncId};
+    final boxSyncById = {for (final b in boxes) b.id: b.syncId};
     final msg = SyncMessages.snapshot(
-      rooms: rooms,
-      boxes: boxes,
-      events: events,
-      tasks: tasks,
+      rooms: rooms.map(WireConverter.fromRoom).toList(),
+      boxes: boxes
+          .map((b) => WireConverter.fromBox(b,
+              roomSyncId: b.roomId == null ? null : roomSyncById[b.roomId]))
+          .toList(),
+      events: events
+          .map((e) => WireConverter.fromEvent(e,
+              boxSyncId: boxSyncById[e.boxId] ?? ''))
+          .where((e) => e.boxSyncId.isNotEmpty)
+          .toList(),
+      tasks: tasks
+          .map((t) => WireConverter.fromTask(t,
+              boxSyncId: boxSyncById[t.boxId] ?? ''))
+          .where((t) => t.boxSyncId.isNotEmpty)
+          .toList(),
     );
     channel.sink.add(jsonEncode(msg));
   }
@@ -166,7 +179,7 @@ class SyncServer {
     } else {
       msg = SyncMessages.delete(
         kind: ev.kind,
-        id: ev.id!,
+        syncId: ev.syncId,
         originDeviceId: deviceId,
       );
     }

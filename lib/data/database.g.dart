@@ -21,6 +21,17 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
       'PRIMARY KEY AUTOINCREMENT',
     ),
   );
+  static const VerificationMeta _syncIdMeta = const VerificationMeta('syncId');
+  @override
+  late final GeneratedColumn<String> syncId = GeneratedColumn<String>(
+    'sync_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+    clientDefault: _uuid,
+  );
   static const VerificationMeta _nameMeta = const VerificationMeta('name');
   @override
   late final GeneratedColumn<String> name = GeneratedColumn<String>(
@@ -43,7 +54,7 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
     clientDefault: _nowMs,
   );
   @override
-  List<GeneratedColumn> get $columns => [id, name, updatedAt];
+  List<GeneratedColumn> get $columns => [id, syncId, name, updatedAt];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -58,6 +69,12 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
     final data = instance.toColumns(true);
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('sync_id')) {
+      context.handle(
+        _syncIdMeta,
+        syncId.isAcceptableOrUnknown(data['sync_id']!, _syncIdMeta),
+      );
     }
     if (data.containsKey('name')) {
       context.handle(
@@ -86,6 +103,10 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
         DriftSqlType.int,
         data['${effectivePrefix}id'],
       )!,
+      syncId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_id'],
+      )!,
       name: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}name'],
@@ -105,10 +126,12 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
 
 class BoxRoom extends DataClass implements Insertable<BoxRoom> {
   final int id;
+  final String syncId;
   final String name;
   final int updatedAt;
   const BoxRoom({
     required this.id,
+    required this.syncId,
     required this.name,
     required this.updatedAt,
   });
@@ -116,6 +139,7 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
+    map['sync_id'] = Variable<String>(syncId);
     map['name'] = Variable<String>(name);
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
@@ -124,6 +148,7 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
   RoomsCompanion toCompanion(bool nullToAbsent) {
     return RoomsCompanion(
       id: Value(id),
+      syncId: Value(syncId),
       name: Value(name),
       updatedAt: Value(updatedAt),
     );
@@ -136,6 +161,7 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return BoxRoom(
       id: serializer.fromJson<int>(json['id']),
+      syncId: serializer.fromJson<String>(json['syncId']),
       name: serializer.fromJson<String>(json['name']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
@@ -145,19 +171,23 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
+      'syncId': serializer.toJson<String>(syncId),
       'name': serializer.toJson<String>(name),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
 
-  BoxRoom copyWith({int? id, String? name, int? updatedAt}) => BoxRoom(
-    id: id ?? this.id,
-    name: name ?? this.name,
-    updatedAt: updatedAt ?? this.updatedAt,
-  );
+  BoxRoom copyWith({int? id, String? syncId, String? name, int? updatedAt}) =>
+      BoxRoom(
+        id: id ?? this.id,
+        syncId: syncId ?? this.syncId,
+        name: name ?? this.name,
+        updatedAt: updatedAt ?? this.updatedAt,
+      );
   BoxRoom copyWithCompanion(RoomsCompanion data) {
     return BoxRoom(
       id: data.id.present ? data.id.value : this.id,
+      syncId: data.syncId.present ? data.syncId.value : this.syncId,
       name: data.name.present ? data.name.value : this.name,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -167,6 +197,7 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
   String toString() {
     return (StringBuffer('BoxRoom(')
           ..write('id: $id, ')
+          ..write('syncId: $syncId, ')
           ..write('name: $name, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -174,37 +205,43 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
   }
 
   @override
-  int get hashCode => Object.hash(id, name, updatedAt);
+  int get hashCode => Object.hash(id, syncId, name, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is BoxRoom &&
           other.id == this.id &&
+          other.syncId == this.syncId &&
           other.name == this.name &&
           other.updatedAt == this.updatedAt);
 }
 
 class RoomsCompanion extends UpdateCompanion<BoxRoom> {
   final Value<int> id;
+  final Value<String> syncId;
   final Value<String> name;
   final Value<int> updatedAt;
   const RoomsCompanion({
     this.id = const Value.absent(),
+    this.syncId = const Value.absent(),
     this.name = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
   RoomsCompanion.insert({
     this.id = const Value.absent(),
+    this.syncId = const Value.absent(),
     required String name,
     this.updatedAt = const Value.absent(),
   }) : name = Value(name);
   static Insertable<BoxRoom> custom({
     Expression<int>? id,
+    Expression<String>? syncId,
     Expression<String>? name,
     Expression<int>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (syncId != null) 'sync_id': syncId,
       if (name != null) 'name': name,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -212,11 +249,13 @@ class RoomsCompanion extends UpdateCompanion<BoxRoom> {
 
   RoomsCompanion copyWith({
     Value<int>? id,
+    Value<String>? syncId,
     Value<String>? name,
     Value<int>? updatedAt,
   }) {
     return RoomsCompanion(
       id: id ?? this.id,
+      syncId: syncId ?? this.syncId,
       name: name ?? this.name,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -227,6 +266,9 @@ class RoomsCompanion extends UpdateCompanion<BoxRoom> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<int>(id.value);
+    }
+    if (syncId.present) {
+      map['sync_id'] = Variable<String>(syncId.value);
     }
     if (name.present) {
       map['name'] = Variable<String>(name.value);
@@ -241,6 +283,7 @@ class RoomsCompanion extends UpdateCompanion<BoxRoom> {
   String toString() {
     return (StringBuffer('RoomsCompanion(')
           ..write('id: $id, ')
+          ..write('syncId: $syncId, ')
           ..write('name: $name, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -266,6 +309,17 @@ class $LitterBoxesTable extends LitterBoxes
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'PRIMARY KEY AUTOINCREMENT',
     ),
+  );
+  static const VerificationMeta _syncIdMeta = const VerificationMeta('syncId');
+  @override
+  late final GeneratedColumn<String> syncId = GeneratedColumn<String>(
+    'sync_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+    clientDefault: _uuid,
   );
   static const VerificationMeta _nameMeta = const VerificationMeta('name');
   @override
@@ -367,6 +421,7 @@ class $LitterBoxesTable extends LitterBoxes
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    syncId,
     name,
     position,
     type,
@@ -391,6 +446,12 @@ class $LitterBoxesTable extends LitterBoxes
     final data = instance.toColumns(true);
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('sync_id')) {
+      context.handle(
+        _syncIdMeta,
+        syncId.isAcceptableOrUnknown(data['sync_id']!, _syncIdMeta),
+      );
     }
     if (data.containsKey('name')) {
       context.handle(
@@ -467,6 +528,10 @@ class $LitterBoxesTable extends LitterBoxes
         DriftSqlType.int,
         data['${effectivePrefix}id'],
       )!,
+      syncId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_id'],
+      )!,
       name: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}name'],
@@ -514,6 +579,7 @@ class $LitterBoxesTable extends LitterBoxes
 
 class LitterBox extends DataClass implements Insertable<LitterBox> {
   final int id;
+  final String syncId;
   final String name;
   final int position;
   final String type;
@@ -525,6 +591,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
   final int updatedAt;
   const LitterBox({
     required this.id,
+    required this.syncId,
     required this.name,
     required this.position,
     required this.type,
@@ -539,6 +606,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
+    map['sync_id'] = Variable<String>(syncId);
     map['name'] = Variable<String>(name);
     map['position'] = Variable<int>(position);
     map['type'] = Variable<String>(type);
@@ -556,6 +624,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
   LitterBoxesCompanion toCompanion(bool nullToAbsent) {
     return LitterBoxesCompanion(
       id: Value(id),
+      syncId: Value(syncId),
       name: Value(name),
       position: Value(position),
       type: Value(type),
@@ -577,6 +646,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return LitterBox(
       id: serializer.fromJson<int>(json['id']),
+      syncId: serializer.fromJson<String>(json['syncId']),
       name: serializer.fromJson<String>(json['name']),
       position: serializer.fromJson<int>(json['position']),
       type: serializer.fromJson<String>(json['type']),
@@ -595,6 +665,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
+      'syncId': serializer.toJson<String>(syncId),
       'name': serializer.toJson<String>(name),
       'position': serializer.toJson<int>(position),
       'type': serializer.toJson<String>(type),
@@ -609,6 +680,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
 
   LitterBox copyWith({
     int? id,
+    String? syncId,
     String? name,
     int? position,
     String? type,
@@ -620,6 +692,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
     int? updatedAt,
   }) => LitterBox(
     id: id ?? this.id,
+    syncId: syncId ?? this.syncId,
     name: name ?? this.name,
     position: position ?? this.position,
     type: type ?? this.type,
@@ -633,6 +706,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
   LitterBox copyWithCompanion(LitterBoxesCompanion data) {
     return LitterBox(
       id: data.id.present ? data.id.value : this.id,
+      syncId: data.syncId.present ? data.syncId.value : this.syncId,
       name: data.name.present ? data.name.value : this.name,
       position: data.position.present ? data.position.value : this.position,
       type: data.type.present ? data.type.value : this.type,
@@ -653,6 +727,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
   String toString() {
     return (StringBuffer('LitterBox(')
           ..write('id: $id, ')
+          ..write('syncId: $syncId, ')
           ..write('name: $name, ')
           ..write('position: $position, ')
           ..write('type: $type, ')
@@ -669,6 +744,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
   @override
   int get hashCode => Object.hash(
     id,
+    syncId,
     name,
     position,
     type,
@@ -684,6 +760,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
       identical(this, other) ||
       (other is LitterBox &&
           other.id == this.id &&
+          other.syncId == this.syncId &&
           other.name == this.name &&
           other.position == this.position &&
           other.type == this.type &&
@@ -697,6 +774,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
 
 class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
   final Value<int> id;
+  final Value<String> syncId;
   final Value<String> name;
   final Value<int> position;
   final Value<String> type;
@@ -708,6 +786,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
   final Value<int> updatedAt;
   const LitterBoxesCompanion({
     this.id = const Value.absent(),
+    this.syncId = const Value.absent(),
     this.name = const Value.absent(),
     this.position = const Value.absent(),
     this.type = const Value.absent(),
@@ -720,6 +799,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
   });
   LitterBoxesCompanion.insert({
     this.id = const Value.absent(),
+    this.syncId = const Value.absent(),
     required String name,
     this.position = const Value.absent(),
     this.type = const Value.absent(),
@@ -732,6 +812,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
   }) : name = Value(name);
   static Insertable<LitterBox> custom({
     Expression<int>? id,
+    Expression<String>? syncId,
     Expression<String>? name,
     Expression<int>? position,
     Expression<String>? type,
@@ -744,6 +825,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (syncId != null) 'sync_id': syncId,
       if (name != null) 'name': name,
       if (position != null) 'position': position,
       if (type != null) 'type': type,
@@ -760,6 +842,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
 
   LitterBoxesCompanion copyWith({
     Value<int>? id,
+    Value<String>? syncId,
     Value<String>? name,
     Value<int>? position,
     Value<String>? type,
@@ -772,6 +855,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
   }) {
     return LitterBoxesCompanion(
       id: id ?? this.id,
+      syncId: syncId ?? this.syncId,
       name: name ?? this.name,
       position: position ?? this.position,
       type: type ?? this.type,
@@ -790,6 +874,9 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<int>(id.value);
+    }
+    if (syncId.present) {
+      map['sync_id'] = Variable<String>(syncId.value);
     }
     if (name.present) {
       map['name'] = Variable<String>(name.value);
@@ -827,6 +914,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
   String toString() {
     return (StringBuffer('LitterBoxesCompanion(')
           ..write('id: $id, ')
+          ..write('syncId: $syncId, ')
           ..write('name: $name, ')
           ..write('position: $position, ')
           ..write('type: $type, ')
@@ -859,6 +947,17 @@ class $CleaningEventsTable extends CleaningEvents
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'PRIMARY KEY AUTOINCREMENT',
     ),
+  );
+  static const VerificationMeta _syncIdMeta = const VerificationMeta('syncId');
+  @override
+  late final GeneratedColumn<String> syncId = GeneratedColumn<String>(
+    'sync_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+    clientDefault: _uuid,
   );
   static const VerificationMeta _boxIdMeta = const VerificationMeta('boxId');
   @override
@@ -912,6 +1011,7 @@ class $CleaningEventsTable extends CleaningEvents
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    syncId,
     boxId,
     timestamp,
     dueToSmell,
@@ -931,6 +1031,12 @@ class $CleaningEventsTable extends CleaningEvents
     final data = instance.toColumns(true);
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('sync_id')) {
+      context.handle(
+        _syncIdMeta,
+        syncId.isAcceptableOrUnknown(data['sync_id']!, _syncIdMeta),
+      );
     }
     if (data.containsKey('box_id')) {
       context.handle(
@@ -976,6 +1082,10 @@ class $CleaningEventsTable extends CleaningEvents
         DriftSqlType.int,
         data['${effectivePrefix}id'],
       )!,
+      syncId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_id'],
+      )!,
       boxId: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}box_id'],
@@ -1003,12 +1113,14 @@ class $CleaningEventsTable extends CleaningEvents
 
 class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
   final int id;
+  final String syncId;
   final int boxId;
   final int timestamp;
   final bool? dueToSmell;
   final int updatedAt;
   const CleaningEvent({
     required this.id,
+    required this.syncId,
     required this.boxId,
     required this.timestamp,
     this.dueToSmell,
@@ -1018,6 +1130,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
+    map['sync_id'] = Variable<String>(syncId);
     map['box_id'] = Variable<int>(boxId);
     map['timestamp'] = Variable<int>(timestamp);
     if (!nullToAbsent || dueToSmell != null) {
@@ -1030,6 +1143,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
   CleaningEventsCompanion toCompanion(bool nullToAbsent) {
     return CleaningEventsCompanion(
       id: Value(id),
+      syncId: Value(syncId),
       boxId: Value(boxId),
       timestamp: Value(timestamp),
       dueToSmell: dueToSmell == null && nullToAbsent
@@ -1046,6 +1160,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return CleaningEvent(
       id: serializer.fromJson<int>(json['id']),
+      syncId: serializer.fromJson<String>(json['syncId']),
       boxId: serializer.fromJson<int>(json['boxId']),
       timestamp: serializer.fromJson<int>(json['timestamp']),
       dueToSmell: serializer.fromJson<bool?>(json['dueToSmell']),
@@ -1057,6 +1172,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
+      'syncId': serializer.toJson<String>(syncId),
       'boxId': serializer.toJson<int>(boxId),
       'timestamp': serializer.toJson<int>(timestamp),
       'dueToSmell': serializer.toJson<bool?>(dueToSmell),
@@ -1066,12 +1182,14 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
 
   CleaningEvent copyWith({
     int? id,
+    String? syncId,
     int? boxId,
     int? timestamp,
     Value<bool?> dueToSmell = const Value.absent(),
     int? updatedAt,
   }) => CleaningEvent(
     id: id ?? this.id,
+    syncId: syncId ?? this.syncId,
     boxId: boxId ?? this.boxId,
     timestamp: timestamp ?? this.timestamp,
     dueToSmell: dueToSmell.present ? dueToSmell.value : this.dueToSmell,
@@ -1080,6 +1198,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
   CleaningEvent copyWithCompanion(CleaningEventsCompanion data) {
     return CleaningEvent(
       id: data.id.present ? data.id.value : this.id,
+      syncId: data.syncId.present ? data.syncId.value : this.syncId,
       boxId: data.boxId.present ? data.boxId.value : this.boxId,
       timestamp: data.timestamp.present ? data.timestamp.value : this.timestamp,
       dueToSmell: data.dueToSmell.present
@@ -1093,6 +1212,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
   String toString() {
     return (StringBuffer('CleaningEvent(')
           ..write('id: $id, ')
+          ..write('syncId: $syncId, ')
           ..write('boxId: $boxId, ')
           ..write('timestamp: $timestamp, ')
           ..write('dueToSmell: $dueToSmell, ')
@@ -1102,12 +1222,14 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
   }
 
   @override
-  int get hashCode => Object.hash(id, boxId, timestamp, dueToSmell, updatedAt);
+  int get hashCode =>
+      Object.hash(id, syncId, boxId, timestamp, dueToSmell, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is CleaningEvent &&
           other.id == this.id &&
+          other.syncId == this.syncId &&
           other.boxId == this.boxId &&
           other.timestamp == this.timestamp &&
           other.dueToSmell == this.dueToSmell &&
@@ -1116,12 +1238,14 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
 
 class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
   final Value<int> id;
+  final Value<String> syncId;
   final Value<int> boxId;
   final Value<int> timestamp;
   final Value<bool?> dueToSmell;
   final Value<int> updatedAt;
   const CleaningEventsCompanion({
     this.id = const Value.absent(),
+    this.syncId = const Value.absent(),
     this.boxId = const Value.absent(),
     this.timestamp = const Value.absent(),
     this.dueToSmell = const Value.absent(),
@@ -1129,6 +1253,7 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
   });
   CleaningEventsCompanion.insert({
     this.id = const Value.absent(),
+    this.syncId = const Value.absent(),
     required int boxId,
     required int timestamp,
     this.dueToSmell = const Value.absent(),
@@ -1137,6 +1262,7 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
        timestamp = Value(timestamp);
   static Insertable<CleaningEvent> custom({
     Expression<int>? id,
+    Expression<String>? syncId,
     Expression<int>? boxId,
     Expression<int>? timestamp,
     Expression<bool>? dueToSmell,
@@ -1144,6 +1270,7 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (syncId != null) 'sync_id': syncId,
       if (boxId != null) 'box_id': boxId,
       if (timestamp != null) 'timestamp': timestamp,
       if (dueToSmell != null) 'due_to_smell': dueToSmell,
@@ -1153,6 +1280,7 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
 
   CleaningEventsCompanion copyWith({
     Value<int>? id,
+    Value<String>? syncId,
     Value<int>? boxId,
     Value<int>? timestamp,
     Value<bool?>? dueToSmell,
@@ -1160,6 +1288,7 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
   }) {
     return CleaningEventsCompanion(
       id: id ?? this.id,
+      syncId: syncId ?? this.syncId,
       boxId: boxId ?? this.boxId,
       timestamp: timestamp ?? this.timestamp,
       dueToSmell: dueToSmell ?? this.dueToSmell,
@@ -1172,6 +1301,9 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<int>(id.value);
+    }
+    if (syncId.present) {
+      map['sync_id'] = Variable<String>(syncId.value);
     }
     if (boxId.present) {
       map['box_id'] = Variable<int>(boxId.value);
@@ -1192,6 +1324,7 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
   String toString() {
     return (StringBuffer('CleaningEventsCompanion(')
           ..write('id: $id, ')
+          ..write('syncId: $syncId, ')
           ..write('boxId: $boxId, ')
           ..write('timestamp: $timestamp, ')
           ..write('dueToSmell: $dueToSmell, ')
@@ -1219,6 +1352,17 @@ class $MaintenanceTasksTable extends MaintenanceTasks
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'PRIMARY KEY AUTOINCREMENT',
     ),
+  );
+  static const VerificationMeta _syncIdMeta = const VerificationMeta('syncId');
+  @override
+  late final GeneratedColumn<String> syncId = GeneratedColumn<String>(
+    'sync_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+    clientDefault: _uuid,
   );
   static const VerificationMeta _boxIdMeta = const VerificationMeta('boxId');
   @override
@@ -1305,6 +1449,7 @@ class $MaintenanceTasksTable extends MaintenanceTasks
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    syncId,
     boxId,
     name,
     intervalCleanings,
@@ -1327,6 +1472,12 @@ class $MaintenanceTasksTable extends MaintenanceTasks
     final data = instance.toColumns(true);
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('sync_id')) {
+      context.handle(
+        _syncIdMeta,
+        syncId.isAcceptableOrUnknown(data['sync_id']!, _syncIdMeta),
+      );
     }
     if (data.containsKey('box_id')) {
       context.handle(
@@ -1400,6 +1551,10 @@ class $MaintenanceTasksTable extends MaintenanceTasks
         DriftSqlType.int,
         data['${effectivePrefix}id'],
       )!,
+      syncId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_id'],
+      )!,
       boxId: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}box_id'],
@@ -1439,6 +1594,7 @@ class $MaintenanceTasksTable extends MaintenanceTasks
 
 class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
   final int id;
+  final String syncId;
   final int boxId;
   final String name;
   final int intervalCleanings;
@@ -1448,6 +1604,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
   final int updatedAt;
   const MaintenanceTask({
     required this.id,
+    required this.syncId,
     required this.boxId,
     required this.name,
     required this.intervalCleanings,
@@ -1460,6 +1617,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
+    map['sync_id'] = Variable<String>(syncId);
     map['box_id'] = Variable<int>(boxId);
     map['name'] = Variable<String>(name);
     map['interval_cleanings'] = Variable<int>(intervalCleanings);
@@ -1473,6 +1631,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
   MaintenanceTasksCompanion toCompanion(bool nullToAbsent) {
     return MaintenanceTasksCompanion(
       id: Value(id),
+      syncId: Value(syncId),
       boxId: Value(boxId),
       name: Value(name),
       intervalCleanings: Value(intervalCleanings),
@@ -1490,6 +1649,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return MaintenanceTask(
       id: serializer.fromJson<int>(json['id']),
+      syncId: serializer.fromJson<String>(json['syncId']),
       boxId: serializer.fromJson<int>(json['boxId']),
       name: serializer.fromJson<String>(json['name']),
       intervalCleanings: serializer.fromJson<int>(json['intervalCleanings']),
@@ -1504,6 +1664,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
+      'syncId': serializer.toJson<String>(syncId),
       'boxId': serializer.toJson<int>(boxId),
       'name': serializer.toJson<String>(name),
       'intervalCleanings': serializer.toJson<int>(intervalCleanings),
@@ -1516,6 +1677,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
 
   MaintenanceTask copyWith({
     int? id,
+    String? syncId,
     int? boxId,
     String? name,
     int? intervalCleanings,
@@ -1525,6 +1687,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
     int? updatedAt,
   }) => MaintenanceTask(
     id: id ?? this.id,
+    syncId: syncId ?? this.syncId,
     boxId: boxId ?? this.boxId,
     name: name ?? this.name,
     intervalCleanings: intervalCleanings ?? this.intervalCleanings,
@@ -1536,6 +1699,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
   MaintenanceTask copyWithCompanion(MaintenanceTasksCompanion data) {
     return MaintenanceTask(
       id: data.id.present ? data.id.value : this.id,
+      syncId: data.syncId.present ? data.syncId.value : this.syncId,
       boxId: data.boxId.present ? data.boxId.value : this.boxId,
       name: data.name.present ? data.name.value : this.name,
       intervalCleanings: data.intervalCleanings.present
@@ -1556,6 +1720,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
   String toString() {
     return (StringBuffer('MaintenanceTask(')
           ..write('id: $id, ')
+          ..write('syncId: $syncId, ')
           ..write('boxId: $boxId, ')
           ..write('name: $name, ')
           ..write('intervalCleanings: $intervalCleanings, ')
@@ -1570,6 +1735,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
   @override
   int get hashCode => Object.hash(
     id,
+    syncId,
     boxId,
     name,
     intervalCleanings,
@@ -1583,6 +1749,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
       identical(this, other) ||
       (other is MaintenanceTask &&
           other.id == this.id &&
+          other.syncId == this.syncId &&
           other.boxId == this.boxId &&
           other.name == this.name &&
           other.intervalCleanings == this.intervalCleanings &&
@@ -1594,6 +1761,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
 
 class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
   final Value<int> id;
+  final Value<String> syncId;
   final Value<int> boxId;
   final Value<String> name;
   final Value<int> intervalCleanings;
@@ -1603,6 +1771,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
   final Value<int> updatedAt;
   const MaintenanceTasksCompanion({
     this.id = const Value.absent(),
+    this.syncId = const Value.absent(),
     this.boxId = const Value.absent(),
     this.name = const Value.absent(),
     this.intervalCleanings = const Value.absent(),
@@ -1613,6 +1782,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
   });
   MaintenanceTasksCompanion.insert({
     this.id = const Value.absent(),
+    this.syncId = const Value.absent(),
     required int boxId,
     required String name,
     required int intervalCleanings,
@@ -1626,6 +1796,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
        anchorTimestamp = Value(anchorTimestamp);
   static Insertable<MaintenanceTask> custom({
     Expression<int>? id,
+    Expression<String>? syncId,
     Expression<int>? boxId,
     Expression<String>? name,
     Expression<int>? intervalCleanings,
@@ -1636,6 +1807,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (syncId != null) 'sync_id': syncId,
       if (boxId != null) 'box_id': boxId,
       if (name != null) 'name': name,
       if (intervalCleanings != null) 'interval_cleanings': intervalCleanings,
@@ -1648,6 +1820,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
 
   MaintenanceTasksCompanion copyWith({
     Value<int>? id,
+    Value<String>? syncId,
     Value<int>? boxId,
     Value<String>? name,
     Value<int>? intervalCleanings,
@@ -1658,6 +1831,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
   }) {
     return MaintenanceTasksCompanion(
       id: id ?? this.id,
+      syncId: syncId ?? this.syncId,
       boxId: boxId ?? this.boxId,
       name: name ?? this.name,
       intervalCleanings: intervalCleanings ?? this.intervalCleanings,
@@ -1673,6 +1847,9 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<int>(id.value);
+    }
+    if (syncId.present) {
+      map['sync_id'] = Variable<String>(syncId.value);
     }
     if (boxId.present) {
       map['box_id'] = Variable<int>(boxId.value);
@@ -1702,6 +1879,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
   String toString() {
     return (StringBuffer('MaintenanceTasksCompanion(')
           ..write('id: $id, ')
+          ..write('syncId: $syncId, ')
           ..write('boxId: $boxId, ')
           ..write('name: $name, ')
           ..write('intervalCleanings: $intervalCleanings, ')
@@ -1762,12 +1940,14 @@ abstract class _$AppDatabase extends GeneratedDatabase {
 typedef $$RoomsTableCreateCompanionBuilder =
     RoomsCompanion Function({
       Value<int> id,
+      Value<String> syncId,
       required String name,
       Value<int> updatedAt,
     });
 typedef $$RoomsTableUpdateCompanionBuilder =
     RoomsCompanion Function({
       Value<int> id,
+      Value<String> syncId,
       Value<String> name,
       Value<int> updatedAt,
     });
@@ -1805,6 +1985,11 @@ class $$RoomsTableFilterComposer extends Composer<_$AppDatabase, $RoomsTable> {
   });
   ColumnFilters<int> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncId => $composableBuilder(
+    column: $table.syncId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1858,6 +2043,11 @@ class $$RoomsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get syncId => $composableBuilder(
+    column: $table.syncId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get name => $composableBuilder(
     column: $table.name,
     builder: (column) => ColumnOrderings(column),
@@ -1880,6 +2070,9 @@ class $$RoomsTableAnnotationComposer
   });
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get syncId =>
+      $composableBuilder(column: $table.syncId, builder: (column) => column);
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
@@ -1942,16 +2135,24 @@ class $$RoomsTableTableManager
           updateCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
+                Value<String> syncId = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
-              }) => RoomsCompanion(id: id, name: name, updatedAt: updatedAt),
+              }) => RoomsCompanion(
+                id: id,
+                syncId: syncId,
+                name: name,
+                updatedAt: updatedAt,
+              ),
           createCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
+                Value<String> syncId = const Value.absent(),
                 required String name,
                 Value<int> updatedAt = const Value.absent(),
               }) => RoomsCompanion.insert(
                 id: id,
+                syncId: syncId,
                 name: name,
                 updatedAt: updatedAt,
               ),
@@ -2004,6 +2205,7 @@ typedef $$RoomsTableProcessedTableManager =
 typedef $$LitterBoxesTableCreateCompanionBuilder =
     LitterBoxesCompanion Function({
       Value<int> id,
+      Value<String> syncId,
       required String name,
       Value<int> position,
       Value<String> type,
@@ -2017,6 +2219,7 @@ typedef $$LitterBoxesTableCreateCompanionBuilder =
 typedef $$LitterBoxesTableUpdateCompanionBuilder =
     LitterBoxesCompanion Function({
       Value<int> id,
+      Value<String> syncId,
       Value<String> name,
       Value<int> position,
       Value<String> type,
@@ -2103,6 +2306,11 @@ class $$LitterBoxesTableFilterComposer
   });
   ColumnFilters<int> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncId => $composableBuilder(
+    column: $table.syncId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2234,6 +2442,11 @@ class $$LitterBoxesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get syncId => $composableBuilder(
+    column: $table.syncId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get name => $composableBuilder(
     column: $table.name,
     builder: (column) => ColumnOrderings(column),
@@ -2309,6 +2522,9 @@ class $$LitterBoxesTableAnnotationComposer
   });
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get syncId =>
+      $composableBuilder(column: $table.syncId, builder: (column) => column);
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
@@ -2445,6 +2661,7 @@ class $$LitterBoxesTableTableManager
           updateCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
+                Value<String> syncId = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<int> position = const Value.absent(),
                 Value<String> type = const Value.absent(),
@@ -2456,6 +2673,7 @@ class $$LitterBoxesTableTableManager
                 Value<int> updatedAt = const Value.absent(),
               }) => LitterBoxesCompanion(
                 id: id,
+                syncId: syncId,
                 name: name,
                 position: position,
                 type: type,
@@ -2469,6 +2687,7 @@ class $$LitterBoxesTableTableManager
           createCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
+                Value<String> syncId = const Value.absent(),
                 required String name,
                 Value<int> position = const Value.absent(),
                 Value<String> type = const Value.absent(),
@@ -2480,6 +2699,7 @@ class $$LitterBoxesTableTableManager
                 Value<int> updatedAt = const Value.absent(),
               }) => LitterBoxesCompanion.insert(
                 id: id,
+                syncId: syncId,
                 name: name,
                 position: position,
                 type: type,
@@ -2617,6 +2837,7 @@ typedef $$LitterBoxesTableProcessedTableManager =
 typedef $$CleaningEventsTableCreateCompanionBuilder =
     CleaningEventsCompanion Function({
       Value<int> id,
+      Value<String> syncId,
       required int boxId,
       required int timestamp,
       Value<bool?> dueToSmell,
@@ -2625,6 +2846,7 @@ typedef $$CleaningEventsTableCreateCompanionBuilder =
 typedef $$CleaningEventsTableUpdateCompanionBuilder =
     CleaningEventsCompanion Function({
       Value<int> id,
+      Value<String> syncId,
       Value<int> boxId,
       Value<int> timestamp,
       Value<bool?> dueToSmell,
@@ -2670,6 +2892,11 @@ class $$CleaningEventsTableFilterComposer
   });
   ColumnFilters<int> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncId => $composableBuilder(
+    column: $table.syncId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2726,6 +2953,11 @@ class $$CleaningEventsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get syncId => $composableBuilder(
+    column: $table.syncId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get timestamp => $composableBuilder(
     column: $table.timestamp,
     builder: (column) => ColumnOrderings(column),
@@ -2776,6 +3008,9 @@ class $$CleaningEventsTableAnnotationComposer
   });
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get syncId =>
+      $composableBuilder(column: $table.syncId, builder: (column) => column);
 
   GeneratedColumn<int> get timestamp =>
       $composableBuilder(column: $table.timestamp, builder: (column) => column);
@@ -2843,12 +3078,14 @@ class $$CleaningEventsTableTableManager
           updateCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
+                Value<String> syncId = const Value.absent(),
                 Value<int> boxId = const Value.absent(),
                 Value<int> timestamp = const Value.absent(),
                 Value<bool?> dueToSmell = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
               }) => CleaningEventsCompanion(
                 id: id,
+                syncId: syncId,
                 boxId: boxId,
                 timestamp: timestamp,
                 dueToSmell: dueToSmell,
@@ -2857,12 +3094,14 @@ class $$CleaningEventsTableTableManager
           createCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
+                Value<String> syncId = const Value.absent(),
                 required int boxId,
                 required int timestamp,
                 Value<bool?> dueToSmell = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
               }) => CleaningEventsCompanion.insert(
                 id: id,
+                syncId: syncId,
                 boxId: boxId,
                 timestamp: timestamp,
                 dueToSmell: dueToSmell,
@@ -2939,6 +3178,7 @@ typedef $$CleaningEventsTableProcessedTableManager =
 typedef $$MaintenanceTasksTableCreateCompanionBuilder =
     MaintenanceTasksCompanion Function({
       Value<int> id,
+      Value<String> syncId,
       required int boxId,
       required String name,
       required int intervalCleanings,
@@ -2950,6 +3190,7 @@ typedef $$MaintenanceTasksTableCreateCompanionBuilder =
 typedef $$MaintenanceTasksTableUpdateCompanionBuilder =
     MaintenanceTasksCompanion Function({
       Value<int> id,
+      Value<String> syncId,
       Value<int> boxId,
       Value<String> name,
       Value<int> intervalCleanings,
@@ -2999,6 +3240,11 @@ class $$MaintenanceTasksTableFilterComposer
   });
   ColumnFilters<int> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncId => $composableBuilder(
+    column: $table.syncId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3070,6 +3316,11 @@ class $$MaintenanceTasksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get syncId => $composableBuilder(
+    column: $table.syncId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get name => $composableBuilder(
     column: $table.name,
     builder: (column) => ColumnOrderings(column),
@@ -3135,6 +3386,9 @@ class $$MaintenanceTasksTableAnnotationComposer
   });
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get syncId =>
+      $composableBuilder(column: $table.syncId, builder: (column) => column);
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
@@ -3215,6 +3469,7 @@ class $$MaintenanceTasksTableTableManager
           updateCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
+                Value<String> syncId = const Value.absent(),
                 Value<int> boxId = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<int> intervalCleanings = const Value.absent(),
@@ -3224,6 +3479,7 @@ class $$MaintenanceTasksTableTableManager
                 Value<int> updatedAt = const Value.absent(),
               }) => MaintenanceTasksCompanion(
                 id: id,
+                syncId: syncId,
                 boxId: boxId,
                 name: name,
                 intervalCleanings: intervalCleanings,
@@ -3235,6 +3491,7 @@ class $$MaintenanceTasksTableTableManager
           createCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
+                Value<String> syncId = const Value.absent(),
                 required int boxId,
                 required String name,
                 required int intervalCleanings,
@@ -3244,6 +3501,7 @@ class $$MaintenanceTasksTableTableManager
                 Value<int> updatedAt = const Value.absent(),
               }) => MaintenanceTasksCompanion.insert(
                 id: id,
+                syncId: syncId,
                 boxId: boxId,
                 name: name,
                 intervalCleanings: intervalCleanings,

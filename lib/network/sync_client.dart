@@ -119,7 +119,12 @@ class SyncClient {
           break;
         case MsgType.snapshot:
           await _applier.applySnapshot(m);
-          lastSnapshot.value = SyncOverview.fromSnapshot(m);
+          lastSnapshot.value = SyncOverview(
+            rooms: (m['rooms'] as List).length,
+            boxes: (m['boxes'] as List).length,
+            events: (m['events'] as List).length,
+            tasks: (m['tasks'] as List).length,
+          );
           break;
         case MsgType.upsert:
           final kind = EntityKindCodec.parse(m['entity'] as String);
@@ -128,8 +133,8 @@ class SyncClient {
           break;
         case MsgType.delete:
           final kind = EntityKindCodec.parse(m['entity'] as String);
-          final id = (m['id'] as num).toInt();
-          await _applier.applyDelete(kind, id);
+          final syncId = m['syncId'] as String;
+          await _applier.applyDelete(kind, syncId);
           break;
         case MsgType.ping:
           _channel?.sink.add(jsonEncode({'type': MsgType.pong}));
@@ -154,7 +159,7 @@ class SyncClient {
     } else {
       msg = SyncMessages.delete(
         kind: ev.kind,
-        id: ev.id!,
+        syncId: ev.syncId,
         originDeviceId: deviceId,
       );
     }

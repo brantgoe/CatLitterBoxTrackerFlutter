@@ -12,18 +12,25 @@ enum MaintenanceSortMode { upNext, byTask }
 
 /// An outbox event emitted whenever the local repository mutates the DB.
 /// The sync engine subscribes to these and forwards over the wire.
+///
+/// Payloads carry already-serialized wire-format JSON so the sync engine
+/// doesn't need any drift awareness.
 class OutboxEvent {
-  OutboxEvent.upsert(this.kind, this.payload)
-      : op = OutboxOp.upsert,
-        id = null;
-  OutboxEvent.delete(this.kind, this.id)
-      : op = OutboxOp.delete,
+  OutboxEvent.upsert({
+    required this.kind,
+    required Map<String, dynamic> this.payload,
+  })  : op = OutboxOp.upsert,
+        syncId = payload['syncId'] as String;
+  OutboxEvent.delete({
+    required this.kind,
+    required this.syncId,
+  })  : op = OutboxOp.delete,
         payload = null;
 
   final OutboxOp op;
   final EntityKind kind;
+  final String syncId;
   final Map<String, dynamic>? payload;
-  final int? id;
 }
 
 enum OutboxOp { upsert, delete }
@@ -170,13 +177,23 @@ class Repository {
 
   Future<void> deleteCleaning(CleaningEvent event) async {
     await db.deleteEvent(event);
-    _outboxController.add(OutboxEvent.delete(EntityKind.event, event.id));
+    _outboxController.add(OutboxEvent.delete(
+      kind: EntityKind.event,
+      syncId: event.syncId,
+    ));
   }
 
   Future<void> deleteCleaningsByIds(List<int> ids) async {
-    await db.deleteEventsByIds(ids);
+    // Capture syncIds before delete so we can announce them.
+    final syncIds = <String>[];
     for (final id in ids) {
-      _outboxController.add(OutboxEvent.delete(EntityKind.event, id));
+      final e = await db.eventById(id);
+      if (e != null) syncIds.add(e.syncId);
+    }
+    await db.deleteEventsByIds(ids);
+    for (final syncId in syncIds) {
+      _outboxController.add(
+          OutboxEvent.delete(kind: EntityKind.event, syncId: syncId));
     }
   }
 
@@ -193,7 +210,10 @@ class Repository {
 
   Future<void> deleteBox(LitterBox box) async {
     await db.deleteBox(box);
-    _outboxController.add(OutboxEvent.delete(EntityKind.box, box.id));
+    _outboxController.add(OutboxEvent.delete(
+      kind: EntityKind.box,
+      syncId: box.syncId,
+    ));
   }
 
   Future<BoxRoom> ensureRoomExists() async {
@@ -229,7 +249,10 @@ class Repository {
 
   Future<void> deleteRoom(BoxRoom room) async {
     await db.deleteRoomEntity(room);
-    _outboxController.add(OutboxEvent.delete(EntityKind.room, room.id));
+    _outboxController.add(OutboxEvent.delete(
+      kind: EntityKind.room,
+      syncId: room.syncId,
+    ));
     if (_activeRoomId.value == room.id) setActiveRoomId(null);
   }
 
@@ -266,7 +289,10 @@ class Repository {
 
   Future<void> deleteMaintenanceTask(MaintenanceTask task) async {
     await db.deleteTask(task);
-    _outboxController.add(OutboxEvent.delete(EntityKind.task, task.id));
+    _outboxController.add(OutboxEvent.delete(
+      kind: EntityKind.task,
+      syncId: task.syncId,
+    ));
   }
 
   Future<void> markMaintenanceComplete(int taskId, {int? now}) async {
@@ -293,11 +319,15 @@ class Repository {
     if (delta != 0) {
       await db.shiftTimestamps(boxId, delta);
       // Re-emit all events for the box since timestamps changed.
+      final box = await db.boxById(boxId);
+      if (box == null) return;
       final events = await db.observeEventsForBox(boxId).first;
       for (final e in events) {
-        _outboxController.add(
-          OutboxEvent.upsert(EntityKind.event, EntityCodec.eventToJson(e)),
-        );
+        final wire = WireConverter.fromEvent(e, boxSyncId: box.syncId);
+        _outboxController.add(OutboxEvent.upsert(
+          kind: EntityKind.event,
+          payload: WireCodec.eventToJson(wire),
+        ));
       }
     }
   }
@@ -317,34 +347,51 @@ class Repository {
 
   Future<void> _emitUpsertRoom(int id) async {
     final r = await db.roomById(id);
-    if (r != null) {
-      _outboxController.add(
-          OutboxEvent.upsert(EntityKind.room, EntityCodec.roomToJson(r)));
-    }
+    if (r == null) return;
+    final wire = WireConverter.fromRoom(r);
+    _outboxController.add(OutboxEvent.upsert(
+      kind: EntityKind.room,
+      payload: WireCodec.roomToJson(wire),
+    ));
   }
 
   Future<void> _emitUpsertBox(int id) async {
     final b = await db.boxById(id);
-    if (b != null) {
-      _outboxController.add(
-          OutboxEvent.upsert(EntityKind.box, EntityCodec.boxToJson(b)));
+    if (b == null) return;
+    String? roomSyncId;
+    if (b.roomId != null) {
+      final r = await db.roomById(b.roomId!);
+      roomSyncId = r?.syncId;
     }
+    final wire = WireConverter.fromBox(b, roomSyncId: roomSyncId);
+    _outboxController.add(OutboxEvent.upsert(
+      kind: EntityKind.box,
+      payload: WireCodec.boxToJson(wire),
+    ));
   }
 
   Future<void> _emitUpsertEvent(int id) async {
     final e = await db.eventById(id);
-    if (e != null) {
-      _outboxController.add(
-          OutboxEvent.upsert(EntityKind.event, EntityCodec.eventToJson(e)));
-    }
+    if (e == null) return;
+    final b = await db.boxById(e.boxId);
+    if (b == null) return;
+    final wire = WireConverter.fromEvent(e, boxSyncId: b.syncId);
+    _outboxController.add(OutboxEvent.upsert(
+      kind: EntityKind.event,
+      payload: WireCodec.eventToJson(wire),
+    ));
   }
 
   Future<void> _emitUpsertTask(int id) async {
     final t = await db.taskById(id);
-    if (t != null) {
-      _outboxController.add(
-          OutboxEvent.upsert(EntityKind.task, EntityCodec.taskToJson(t)));
-    }
+    if (t == null) return;
+    final b = await db.boxById(t.boxId);
+    if (b == null) return;
+    final wire = WireConverter.fromTask(t, boxSyncId: b.syncId);
+    _outboxController.add(OutboxEvent.upsert(
+      kind: EntityKind.task,
+      payload: WireCodec.taskToJson(wire),
+    ));
   }
 
   /// Wipe the entire local database. Used when joining a network as a

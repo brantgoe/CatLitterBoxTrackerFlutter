@@ -24,7 +24,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     final currentRoom = rooms.firstWhere(
       (r) => r.id == targetId,
       orElse: () => rooms.isEmpty
-          ? BoxRoom(id: 0, name: '', updatedAt: 0)
+          ? BoxRoom(id: 0, syncId: '', name: '', updatedAt: 0)
           : rooms.first,
     );
 

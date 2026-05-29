@@ -1,7 +1,10 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 part 'database.g.dart';
+
+String _uuid() => const Uuid().v4();
 
 enum BoxTypeKind { manualScoop, automatic }
 
@@ -25,6 +28,7 @@ class Rooms extends Table {
   String get tableName => 'rooms';
 
   IntColumn get id => integer().autoIncrement()();
+  TextColumn get syncId => text().clientDefault(_uuid).unique()();
   TextColumn get name => text()();
   IntColumn get updatedAt => integer().clientDefault(_nowMs)();
 }
@@ -35,6 +39,7 @@ class LitterBoxes extends Table {
   String get tableName => 'litter_boxes';
 
   IntColumn get id => integer().autoIncrement()();
+  TextColumn get syncId => text().clientDefault(_uuid).unique()();
   TextColumn get name => text()();
   IntColumn get position => integer().withDefault(const Constant(0))();
   TextColumn get type => text().withDefault(const Constant('MANUAL_SCOOP'))();
@@ -54,6 +59,7 @@ class CleaningEvents extends Table {
   String get tableName => 'cleaning_events';
 
   IntColumn get id => integer().autoIncrement()();
+  TextColumn get syncId => text().clientDefault(_uuid).unique()();
   IntColumn get boxId =>
       integer().references(LitterBoxes, #id, onDelete: KeyAction.cascade)();
   IntColumn get timestamp => integer()();
@@ -67,6 +73,7 @@ class MaintenanceTasks extends Table {
   String get tableName => 'maintenance_tasks';
 
   IntColumn get id => integer().autoIncrement()();
+  TextColumn get syncId => text().clientDefault(_uuid).unique()();
   IntColumn get boxId =>
       integer().references(LitterBoxes, #id, onDelete: KeyAction.cascade)();
   TextColumn get name => text()();
@@ -88,7 +95,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(driftDatabase(name: 'litter_tracker'));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -110,6 +117,36 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(litterBoxes, litterBoxes.updatedAt);
             await m.addColumn(cleaningEvents, cleaningEvents.updatedAt);
             await m.addColumn(maintenanceTasks, maintenanceTasks.updatedAt);
+          }
+          if (from < 3) {
+            // SQLite cannot add a NOT NULL UNIQUE column via ALTER, so we add
+            // the column unconstrained, backfill UUID-shaped values into every
+            // row, then add the uniqueness as a separate index.
+            for (final t in [
+              'rooms',
+              'litter_boxes',
+              'cleaning_events',
+              'maintenance_tasks'
+            ]) {
+              await customStatement(
+                  "ALTER TABLE $t ADD COLUMN sync_id TEXT NOT NULL DEFAULT ''");
+            }
+            const backfill = "lower(hex(randomblob(4))) || '-' || "
+                "lower(hex(randomblob(2))) || '-' || "
+                "lower(hex(randomblob(2))) || '-' || "
+                "lower(hex(randomblob(2))) || '-' || "
+                "lower(hex(randomblob(6)))";
+            for (final t in [
+              'rooms',
+              'litter_boxes',
+              'cleaning_events',
+              'maintenance_tasks'
+            ]) {
+              await customStatement(
+                  "UPDATE $t SET sync_id = $backfill WHERE sync_id = ''");
+              await customStatement(
+                  "CREATE UNIQUE INDEX IF NOT EXISTS ${t}_sync_id_idx ON $t(sync_id)");
+            }
           }
         },
         beforeOpen: (details) async {
@@ -327,4 +364,21 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> syncDeleteTask(int id) =>
       (delete(maintenanceTasks)..where((t) => t.id.equals(id))).go();
+
+  // --- syncId lookups: cross-device IDs map to local integer IDs.
+
+  Future<BoxRoom?> roomBySyncId(String syncId) =>
+      (select(rooms)..where((t) => t.syncId.equals(syncId))).getSingleOrNull();
+
+  Future<LitterBox?> boxBySyncId(String syncId) =>
+      (select(litterBoxes)..where((t) => t.syncId.equals(syncId)))
+          .getSingleOrNull();
+
+  Future<CleaningEvent?> eventBySyncId(String syncId) =>
+      (select(cleaningEvents)..where((t) => t.syncId.equals(syncId)))
+          .getSingleOrNull();
+
+  Future<MaintenanceTask?> taskBySyncId(String syncId) =>
+      (select(maintenanceTasks)..where((t) => t.syncId.equals(syncId)))
+          .getSingleOrNull();
 }
