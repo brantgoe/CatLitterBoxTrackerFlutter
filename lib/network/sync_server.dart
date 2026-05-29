@@ -38,7 +38,8 @@ class SyncServer {
   final SyncApplier _applier;
   HttpServer? _httpServer;
   final List<_ConnectedClient> _clients = [];
-  StreamSubscription<OutboxEvent>? _outboxSub;
+  StreamSubscription<void>? _outboxSub;
+  bool _draining = false;
 
   final ValueNotifier<int> connectedClients = ValueNotifier(0);
 
@@ -58,7 +59,10 @@ class SyncServer {
       port,
     );
 
-    _outboxSub = repository.outbox.listen(_broadcastOutbox);
+    _outboxSub = repository.outboxWakeup.listen((_) => _drainOutbox());
+    // Drain anything that was queued before this start (crash recovery,
+    // or events accumulated while the engine wasn't running).
+    await _drainOutbox();
   }
 
   static void _silentLogger(String _, bool _) {}
@@ -182,23 +186,36 @@ class SyncServer {
     channel.sink.add(jsonEncode(msg));
   }
 
-  void _broadcastOutbox(OutboxEvent ev) {
-    Map<String, dynamic> msg;
-    if (ev.op == OutboxOp.upsert) {
-      msg = {
-        'type': MsgType.upsert,
-        'entity': ev.kind.wire,
-        'originDeviceId': deviceId,
-        'data': ev.payload!,
-      };
-    } else {
-      msg = SyncMessages.delete(
-        kind: ev.kind,
-        syncId: ev.syncId,
-        originDeviceId: deviceId,
-      );
+  Future<void> _drainOutbox() async {
+    if (_draining) return;
+    _draining = true;
+    try {
+      while (true) {
+        final batch = await repository.drainOutbox(limit: 64);
+        if (batch.isEmpty) break;
+        for (final ev in batch) {
+          Map<String, dynamic> msg;
+          if (ev.op == OutboxOp.upsert) {
+            msg = {
+              'type': MsgType.upsert,
+              'entity': ev.kind.wire,
+              'originDeviceId': deviceId,
+              'data': ev.payload!,
+            };
+          } else {
+            msg = SyncMessages.delete(
+              kind: ev.kind,
+              syncId: ev.syncId,
+              originDeviceId: deviceId,
+            );
+          }
+          _broadcastRaw(jsonEncode(msg));
+          await repository.ackOutbox(ev.rowId);
+        }
+      }
+    } finally {
+      _draining = false;
     }
-    _broadcastRaw(jsonEncode(msg));
   }
 
   void _broadcastRaw(String encoded, {String? exceptDeviceId}) {

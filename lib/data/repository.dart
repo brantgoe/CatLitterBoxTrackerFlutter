@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
@@ -10,27 +11,33 @@ import 'database.dart';
 
 enum MaintenanceSortMode { upNext, byTask }
 
-/// An outbox event emitted whenever the local repository mutates the DB.
-/// The sync engine subscribes to these and forwards over the wire.
-///
-/// Payloads carry already-serialized wire-format JSON so the sync engine
-/// doesn't need any drift awareness.
+/// A drained outbox row, ready to be broadcast on the wire.
 class OutboxEvent {
-  OutboxEvent.upsert({
-    required this.kind,
-    required Map<String, dynamic> this.payload,
-  })  : op = OutboxOp.upsert,
-        syncId = payload['syncId'] as String;
-  OutboxEvent.delete({
+  const OutboxEvent({
+    required this.rowId,
+    required this.op,
     required this.kind,
     required this.syncId,
-  })  : op = OutboxOp.delete,
-        payload = null;
+    required this.payload,
+  });
 
+  final int rowId;
   final OutboxOp op;
   final EntityKind kind;
   final String syncId;
   final Map<String, dynamic>? payload;
+
+  static OutboxEvent fromRow(OutboxRow r) {
+    return OutboxEvent(
+      rowId: r.id,
+      op: r.op == 'delete' ? OutboxOp.delete : OutboxOp.upsert,
+      kind: EntityKindCodec.parse(r.entityKind),
+      syncId: r.syncId,
+      payload: r.payload == null
+          ? null
+          : jsonDecode(r.payload!) as Map<String, dynamic>,
+    );
+  }
 }
 
 enum OutboxOp { upsert, delete }
@@ -54,8 +61,22 @@ class Repository {
   final AppDatabase db;
   final SharedPreferences _prefs;
 
-  final _outboxController = StreamController<OutboxEvent>.broadcast();
-  Stream<OutboxEvent> get outbox => _outboxController.stream;
+  /// Wakes up subscribers (the sync engine) when there might be new outbox
+  /// rows to drain. Carries no payload — consumers query the outbox table.
+  final _outboxWakeup = StreamController<void>.broadcast();
+  Stream<void> get outboxWakeup => _outboxWakeup.stream;
+
+  /// Drain all currently-pending outbox rows in insertion order.
+  Future<List<OutboxEvent>> drainOutbox({int limit = 200}) async {
+    final rows = await db.pendingOutboxRows(limit: limit);
+    return rows.map(OutboxEvent.fromRow).toList();
+  }
+
+  Future<void> ackOutbox(int rowId) => db.deleteOutboxRow(rowId);
+
+  Future<int> pendingOutboxCount() => db.countOutboxRows();
+
+  void _signal() => _outboxWakeup.add(null);
 
   final ValueNotifier<int?> _activeRoomId = ValueNotifier<int?>(null);
   ValueListenable<int?> get activeRoomId => _activeRoomId;
@@ -119,20 +140,83 @@ class Repository {
   Stream<List<MaintenanceTask>> observeMaintenanceTasks(int boxId) =>
       db.observeTasksForBox(boxId);
 
+  // --- outbox helpers (run inside the active transaction) ----------------
+
+  Future<void> _enqueueUpsert(EntityKind kind, Map<String, dynamic> json) async {
+    await db.insertOutboxRow(SyncOutboxCompanion.insert(
+      entityKind: kind.wire,
+      op: 'upsert',
+      syncId: json['syncId'] as String,
+      payload: Value(jsonEncode(json)),
+    ));
+  }
+
+  Future<void> _enqueueDelete(EntityKind kind, String syncId) async {
+    await db.insertOutboxRow(SyncOutboxCompanion.insert(
+      entityKind: kind.wire,
+      op: 'delete',
+      syncId: syncId,
+      payload: const Value(null),
+    ));
+  }
+
+  Future<Map<String, dynamic>?> _roomPayload(int id) async {
+    final r = await db.roomById(id);
+    if (r == null) return null;
+    return WireCodec.roomToJson(WireConverter.fromRoom(r));
+  }
+
+  Future<Map<String, dynamic>?> _boxPayload(int id) async {
+    final b = await db.boxById(id);
+    if (b == null) return null;
+    String? roomSyncId;
+    if (b.roomId != null) {
+      final r = await db.roomById(b.roomId!);
+      roomSyncId = r?.syncId;
+    }
+    return WireCodec.boxToJson(WireConverter.fromBox(b, roomSyncId: roomSyncId));
+  }
+
+  Future<Map<String, dynamic>?> _eventPayload(int id) async {
+    final e = await db.eventById(id);
+    if (e == null) return null;
+    final b = await db.boxById(e.boxId);
+    if (b == null) return null;
+    return WireCodec.eventToJson(
+        WireConverter.fromEvent(e, boxSyncId: b.syncId));
+  }
+
+  Future<Map<String, dynamic>?> _taskPayload(int id) async {
+    final t = await db.taskById(id);
+    if (t == null) return null;
+    final b = await db.boxById(t.boxId);
+    if (b == null) return null;
+    return WireCodec.taskToJson(
+        WireConverter.fromTask(t, boxSyncId: b.syncId));
+  }
+
+  // --- mutations: each one writes to its entity table AND the outbox table
+  //     inside a single drift transaction.
+
   Future<int> logCleaning(
     int boxId, {
     int? timestamp,
     bool? dueToSmell,
   }) async {
     final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch;
-    final id = await db.insertEvent(
-      CleaningEventsCompanion.insert(
-        boxId: boxId,
-        timestamp: ts,
-        dueToSmell: Value(dueToSmell),
-      ),
-    );
-    await _emitUpsertEvent(id);
+    final id = await db.transaction(() async {
+      final id = await db.insertEvent(
+        CleaningEventsCompanion.insert(
+          boxId: boxId,
+          timestamp: ts,
+          dueToSmell: Value(dueToSmell),
+        ),
+      );
+      final payload = await _eventPayload(id);
+      if (payload != null) await _enqueueUpsert(EntityKind.event, payload);
+      return id;
+    });
+    _signal();
     return id;
   }
 
@@ -152,8 +236,12 @@ class Repository {
   Future<void> setCleaningSmell(int eventId, bool? dueToSmell) async {
     final existing = await db.eventById(eventId);
     if (existing == null) return;
-    await db.updateEvent(existing.copyWith(dueToSmell: Value(dueToSmell)));
-    await _emitUpsertEvent(eventId);
+    await db.transaction(() async {
+      await db.updateEvent(existing.copyWith(dueToSmell: Value(dueToSmell)));
+      final payload = await _eventPayload(eventId);
+      if (payload != null) await _enqueueUpsert(EntityKind.event, payload);
+    });
+    _signal();
   }
 
   Future<void> updateCleaningSmellForRoom(
@@ -166,61 +254,81 @@ class Repository {
   }
 
   Future<int> reinsertCleaning(CleaningEvent event) async {
-    final id = await db.insertEvent(CleaningEventsCompanion.insert(
-      boxId: event.boxId,
-      timestamp: event.timestamp,
-      dueToSmell: Value(event.dueToSmell),
-    ));
-    await _emitUpsertEvent(id);
+    final id = await db.transaction(() async {
+      final id = await db.insertEvent(CleaningEventsCompanion.insert(
+        boxId: event.boxId,
+        timestamp: event.timestamp,
+        dueToSmell: Value(event.dueToSmell),
+      ));
+      final payload = await _eventPayload(id);
+      if (payload != null) await _enqueueUpsert(EntityKind.event, payload);
+      return id;
+    });
+    _signal();
     return id;
   }
 
   Future<void> deleteCleaning(CleaningEvent event) async {
-    await db.deleteEvent(event);
-    _outboxController.add(OutboxEvent.delete(
-      kind: EntityKind.event,
-      syncId: event.syncId,
-    ));
+    await db.transaction(() async {
+      await db.deleteEvent(event);
+      await _enqueueDelete(EntityKind.event, event.syncId);
+    });
+    _signal();
   }
 
   Future<void> deleteCleaningsByIds(List<int> ids) async {
-    // Capture syncIds before delete so we can announce them.
     final syncIds = <String>[];
     for (final id in ids) {
       final e = await db.eventById(id);
       if (e != null) syncIds.add(e.syncId);
     }
-    await db.deleteEventsByIds(ids);
-    for (final syncId in syncIds) {
-      _outboxController.add(
-          OutboxEvent.delete(kind: EntityKind.event, syncId: syncId));
-    }
+    await db.transaction(() async {
+      await db.deleteEventsByIds(ids);
+      for (final syncId in syncIds) {
+        await _enqueueDelete(EntityKind.event, syncId);
+      }
+    });
+    _signal();
   }
 
   Future<void> updateBox(LitterBox box) async {
-    await db.updateBox(box);
-    await _emitUpsertBox(box.id);
+    await db.transaction(() async {
+      await db.updateBox(box);
+      final payload = await _boxPayload(box.id);
+      if (payload != null) await _enqueueUpsert(EntityKind.box, payload);
+    });
+    _signal();
   }
 
   Future<int> insertBox(LitterBoxesCompanion box) async {
-    final id = await db.insertBox(box);
-    await _emitUpsertBox(id);
+    final id = await db.transaction(() async {
+      final id = await db.insertBox(box);
+      final payload = await _boxPayload(id);
+      if (payload != null) await _enqueueUpsert(EntityKind.box, payload);
+      return id;
+    });
+    _signal();
     return id;
   }
 
   Future<void> deleteBox(LitterBox box) async {
-    await db.deleteBox(box);
-    _outboxController.add(OutboxEvent.delete(
-      kind: EntityKind.box,
-      syncId: box.syncId,
-    ));
+    await db.transaction(() async {
+      await db.deleteBox(box);
+      await _enqueueDelete(EntityKind.box, box.syncId);
+    });
+    _signal();
   }
 
   Future<BoxRoom> ensureRoomExists() async {
     final first = await db.firstRoomOrNull();
     if (first != null) return first;
-    final id = await db.insertRoom('Main');
-    await _emitUpsertRoom(id);
+    final id = await db.transaction(() async {
+      final id = await db.insertRoom('Main');
+      final payload = await _roomPayload(id);
+      if (payload != null) await _enqueueUpsert(EntityKind.room, payload);
+      return id;
+    });
+    _signal();
     return (await db.roomById(id))!;
   }
 
@@ -228,32 +336,46 @@ class Repository {
     final first = await db.firstBoxOrNull();
     if (first != null) return first;
     final room = await ensureRoomExists();
-    final id = await db.insertBox(LitterBoxesCompanion.insert(
-      name: 'Litter Box',
-      roomId: Value(room.id),
-    ));
-    await _emitUpsertBox(id);
+    final id = await db.transaction(() async {
+      final id = await db.insertBox(LitterBoxesCompanion.insert(
+        name: 'Litter Box',
+        roomId: Value(room.id),
+      ));
+      final payload = await _boxPayload(id);
+      if (payload != null) await _enqueueUpsert(EntityKind.box, payload);
+      return id;
+    });
+    _signal();
     return (await db.boxById(id))!;
   }
 
   Future<void> updateRoom(BoxRoom room) async {
-    await db.updateRoomEntity(room);
-    await _emitUpsertRoom(room.id);
+    await db.transaction(() async {
+      await db.updateRoomEntity(room);
+      final payload = await _roomPayload(room.id);
+      if (payload != null) await _enqueueUpsert(EntityKind.room, payload);
+    });
+    _signal();
   }
 
   Future<int> insertRoom(String name) async {
-    final id = await db.insertRoom(name);
-    await _emitUpsertRoom(id);
+    final id = await db.transaction(() async {
+      final id = await db.insertRoom(name);
+      final payload = await _roomPayload(id);
+      if (payload != null) await _enqueueUpsert(EntityKind.room, payload);
+      return id;
+    });
+    _signal();
     return id;
   }
 
   Future<void> deleteRoom(BoxRoom room) async {
-    await db.deleteRoomEntity(room);
-    _outboxController.add(OutboxEvent.delete(
-      kind: EntityKind.room,
-      syncId: room.syncId,
-    ));
+    await db.transaction(() async {
+      await db.deleteRoomEntity(room);
+      await _enqueueDelete(EntityKind.room, room.syncId);
+    });
     if (_activeRoomId.value == room.id) setActiveRoomId(null);
+    _signal();
   }
 
   Future<int> addMaintenanceTask(MaintenanceTasksCompanion task) async {
@@ -276,59 +398,76 @@ class Repository {
         }
       }
     }
-    final id =
-        await db.insertTask(task.copyWith(offsetCleanings: Value(stagger)));
-    await _emitUpsertTask(id);
+    final id = await db.transaction(() async {
+      final id = await db
+          .insertTask(task.copyWith(offsetCleanings: Value(stagger)));
+      final payload = await _taskPayload(id);
+      if (payload != null) await _enqueueUpsert(EntityKind.task, payload);
+      return id;
+    });
+    _signal();
     return id;
   }
 
   Future<void> updateMaintenanceTask(MaintenanceTask task) async {
-    await db.updateTask(task);
-    await _emitUpsertTask(task.id);
+    await db.transaction(() async {
+      await db.updateTask(task);
+      final payload = await _taskPayload(task.id);
+      if (payload != null) await _enqueueUpsert(EntityKind.task, payload);
+    });
+    _signal();
   }
 
   Future<void> deleteMaintenanceTask(MaintenanceTask task) async {
-    await db.deleteTask(task);
-    _outboxController.add(OutboxEvent.delete(
-      kind: EntityKind.task,
-      syncId: task.syncId,
-    ));
+    await db.transaction(() async {
+      await db.deleteTask(task);
+      await _enqueueDelete(EntityKind.task, task.syncId);
+    });
+    _signal();
   }
 
   Future<void> markMaintenanceComplete(int taskId, {int? now}) async {
     final task = await db.taskById(taskId);
     if (task == null) return;
-    await db.updateTask(task.copyWith(
-      anchorTimestamp: now ?? DateTime.now().millisecondsSinceEpoch,
-      offsetCleanings: 0,
-    ));
-    await _emitUpsertTask(taskId);
+    await db.transaction(() async {
+      await db.updateTask(task.copyWith(
+        anchorTimestamp: now ?? DateTime.now().millisecondsSinceEpoch,
+        offsetCleanings: 0,
+      ));
+      final payload = await _taskPayload(taskId);
+      if (payload != null) await _enqueueUpsert(EntityKind.task, payload);
+    });
+    _signal();
   }
 
   Future<void> setLastCleaningTimestamp(int boxId, int timestamp) async {
     final existing = await db.mostRecent(boxId);
     if (existing == null) {
-      final id = await db.insertEvent(CleaningEventsCompanion.insert(
-        boxId: boxId,
-        timestamp: timestamp,
-      ));
-      await _emitUpsertEvent(id);
+      await db.transaction(() async {
+        final id = await db.insertEvent(CleaningEventsCompanion.insert(
+          boxId: boxId,
+          timestamp: timestamp,
+        ));
+        final payload = await _eventPayload(id);
+        if (payload != null) await _enqueueUpsert(EntityKind.event, payload);
+      });
+      _signal();
       return;
     }
     final delta = timestamp - existing.timestamp;
     if (delta != 0) {
-      await db.shiftTimestamps(boxId, delta);
-      // Re-emit all events for the box since timestamps changed.
       final box = await db.boxById(boxId);
       if (box == null) return;
-      final events = await db.observeEventsForBox(boxId).first;
-      for (final e in events) {
-        final wire = WireConverter.fromEvent(e, boxSyncId: box.syncId);
-        _outboxController.add(OutboxEvent.upsert(
-          kind: EntityKind.event,
-          payload: WireCodec.eventToJson(wire),
-        ));
-      }
+      await db.transaction(() async {
+        await db.shiftTimestamps(boxId, delta);
+        final events = await db.observeEventsForBox(boxId).first;
+        for (final e in events) {
+          final payload = WireCodec.eventToJson(
+              WireConverter.fromEvent(e, boxSyncId: box.syncId));
+          await _enqueueUpsert(EntityKind.event, payload);
+        }
+      });
+      _signal();
     }
   }
 
@@ -339,69 +478,26 @@ class Repository {
     final task = await db.taskById(taskId);
     if (task == null) return;
     final count = await cleaningsSinceAnchor(task.boxId, task.anchorTimestamp);
-    await db.updateTask(task.copyWith(
-      intervalCleanings: count.clamp(0, 999999),
-    ));
-    await _emitUpsertTask(taskId);
-  }
-
-  Future<void> _emitUpsertRoom(int id) async {
-    final r = await db.roomById(id);
-    if (r == null) return;
-    final wire = WireConverter.fromRoom(r);
-    _outboxController.add(OutboxEvent.upsert(
-      kind: EntityKind.room,
-      payload: WireCodec.roomToJson(wire),
-    ));
-  }
-
-  Future<void> _emitUpsertBox(int id) async {
-    final b = await db.boxById(id);
-    if (b == null) return;
-    String? roomSyncId;
-    if (b.roomId != null) {
-      final r = await db.roomById(b.roomId!);
-      roomSyncId = r?.syncId;
-    }
-    final wire = WireConverter.fromBox(b, roomSyncId: roomSyncId);
-    _outboxController.add(OutboxEvent.upsert(
-      kind: EntityKind.box,
-      payload: WireCodec.boxToJson(wire),
-    ));
-  }
-
-  Future<void> _emitUpsertEvent(int id) async {
-    final e = await db.eventById(id);
-    if (e == null) return;
-    final b = await db.boxById(e.boxId);
-    if (b == null) return;
-    final wire = WireConverter.fromEvent(e, boxSyncId: b.syncId);
-    _outboxController.add(OutboxEvent.upsert(
-      kind: EntityKind.event,
-      payload: WireCodec.eventToJson(wire),
-    ));
-  }
-
-  Future<void> _emitUpsertTask(int id) async {
-    final t = await db.taskById(id);
-    if (t == null) return;
-    final b = await db.boxById(t.boxId);
-    if (b == null) return;
-    final wire = WireConverter.fromTask(t, boxSyncId: b.syncId);
-    _outboxController.add(OutboxEvent.upsert(
-      kind: EntityKind.task,
-      payload: WireCodec.taskToJson(wire),
-    ));
+    await db.transaction(() async {
+      await db.updateTask(task.copyWith(
+        intervalCleanings: count.clamp(0, 999999),
+      ));
+      final payload = await _taskPayload(taskId);
+      if (payload != null) await _enqueueUpsert(EntityKind.task, payload);
+    });
+    _signal();
   }
 
   /// Wipe the entire local database. Used when joining a network as a
-  /// client; the master's snapshot replaces local state.
+  /// client; the master's snapshot replaces local state. Also clears the
+  /// outbox so a stale change doesn't get sent to the master post-snapshot.
   Future<void> wipeAll() async {
     await db.transaction(() async {
       await db.delete(db.cleaningEvents).go();
       await db.delete(db.maintenanceTasks).go();
       await db.delete(db.litterBoxes).go();
       await db.delete(db.rooms).go();
+      await db.delete(db.syncOutbox).go();
     });
     setActiveRoomId(null);
   }

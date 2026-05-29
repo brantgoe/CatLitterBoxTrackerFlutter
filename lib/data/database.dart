@@ -88,14 +88,31 @@ extension LitterBoxX on LitterBox {
   BoxTypeKind get typeKind => BoxTypeKindStorage.fromStorage(type);
 }
 
+/// A durable queue of changes that still need to be broadcast (master) or
+/// sent to master (client). Written in the same transaction as the source
+/// mutation so a process kill between commit and network send can't drop
+/// a change.
+@DataClassName('OutboxRow')
+class SyncOutbox extends Table {
+  @override
+  String get tableName => 'sync_outbox';
+
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get entityKind => text()();
+  TextColumn get op => text()(); // 'upsert' | 'delete'
+  TextColumn get syncId => text()();
+  TextColumn get payload => text().nullable()();
+  IntColumn get createdAt => integer().clientDefault(_nowMs)();
+}
+
 @DriftDatabase(
-  tables: [Rooms, LitterBoxes, CleaningEvents, MaintenanceTasks],
+  tables: [Rooms, LitterBoxes, CleaningEvents, MaintenanceTasks, SyncOutbox],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(driftDatabase(name: 'litter_tracker'));
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -147,6 +164,9 @@ class AppDatabase extends _$AppDatabase {
               await customStatement(
                   "CREATE UNIQUE INDEX IF NOT EXISTS ${t}_sync_id_idx ON $t(sync_id)");
             }
+          }
+          if (from < 4) {
+            await m.createTable(syncOutbox);
           }
         },
         beforeOpen: (details) async {
@@ -364,6 +384,26 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> syncDeleteTask(int id) =>
       (delete(maintenanceTasks)..where((t) => t.id.equals(id))).go();
+
+  // --- Outbox -----------------------------------------------------------
+
+  Future<int> insertOutboxRow(SyncOutboxCompanion c) =>
+      into(syncOutbox).insert(c);
+
+  Future<List<OutboxRow>> pendingOutboxRows({int limit = 200}) =>
+      (select(syncOutbox)
+            ..orderBy([(t) => OrderingTerm.asc(t.id)])
+            ..limit(limit))
+          .get();
+
+  Future<void> deleteOutboxRow(int id) =>
+      (delete(syncOutbox)..where((t) => t.id.equals(id))).go();
+
+  Future<int> countOutboxRows() async {
+    final q = selectOnly(syncOutbox)..addColumns([syncOutbox.id.count()]);
+    final row = await q.getSingle();
+    return row.read<int>(syncOutbox.id.count()) ?? 0;
+  }
 
   // --- syncId lookups: cross-device IDs map to local integer IDs.
 

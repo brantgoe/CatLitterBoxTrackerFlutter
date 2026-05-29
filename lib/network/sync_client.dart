@@ -32,8 +32,9 @@ class SyncClient {
 
   final SyncApplier _applier;
   WebSocketChannel? _channel;
-  StreamSubscription<OutboxEvent>? _outboxSub;
+  StreamSubscription<void>? _outboxSub;
   Timer? _reconnectTimer;
+  bool _draining = false;
   int _reconnectAttempts = 0;
   bool _stopped = false;
 
@@ -75,7 +76,9 @@ class SyncClient {
         accessToken: accessToken.isEmpty ? null : accessToken,
       )));
 
-      _outboxSub = repository.outbox.listen(_sendOutbox);
+      _outboxSub = repository.outboxWakeup.listen((_) => _drainOutbox());
+      // Pick up any rows queued before this connection started.
+      unawaited(_drainOutbox());
 
       _channel!.stream.listen(
         _onMessage,
@@ -153,28 +156,44 @@ class SyncClient {
     }
   }
 
-  void _sendOutbox(OutboxEvent ev) {
+  Future<void> _drainOutbox() async {
+    if (_draining) return;
     final channel = _channel;
     if (channel == null) return;
-    Map<String, dynamic> msg;
-    if (ev.op == OutboxOp.upsert) {
-      msg = {
-        'type': MsgType.upsert,
-        'entity': ev.kind.wire,
-        'originDeviceId': deviceId,
-        'data': ev.payload!,
-      };
-    } else {
-      msg = SyncMessages.delete(
-        kind: ev.kind,
-        syncId: ev.syncId,
-        originDeviceId: deviceId,
-      );
-    }
+    _draining = true;
     try {
-      channel.sink.add(jsonEncode(msg));
-    } catch (e) {
-      debugPrint('[SyncClient] send error: $e');
+      while (true) {
+        if (_channel == null) break;
+        final batch = await repository.drainOutbox(limit: 64);
+        if (batch.isEmpty) break;
+        for (final ev in batch) {
+          Map<String, dynamic> msg;
+          if (ev.op == OutboxOp.upsert) {
+            msg = {
+              'type': MsgType.upsert,
+              'entity': ev.kind.wire,
+              'originDeviceId': deviceId,
+              'data': ev.payload!,
+            };
+          } else {
+            msg = SyncMessages.delete(
+              kind: ev.kind,
+              syncId: ev.syncId,
+              originDeviceId: deviceId,
+            );
+          }
+          try {
+            channel.sink.add(jsonEncode(msg));
+            await repository.ackOutbox(ev.rowId);
+          } catch (e) {
+            debugPrint('[SyncClient] send error: $e');
+            // Leave the row in the outbox; will retry on next reconnect.
+            return;
+          }
+        }
+      }
+    } finally {
+      _draining = false;
     }
   }
 }
