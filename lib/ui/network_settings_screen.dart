@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 
+import '../network/mdns.dart';
 import '../network/network_preferences.dart';
 import '../network/sync_applier.dart';
 import '../network/sync_client.dart';
@@ -270,7 +271,16 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
             hintText: 'e.g. 192.168.1.42',
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            icon: const Icon(Icons.wifi_find),
+            label: const Text('Scan LAN for master'),
+            onPressed: _scanForMaster,
+          ),
+        ),
+        const SizedBox(height: 4),
         TextField(
           controller: _tokenCtrl,
           textCapitalization: TextCapitalization.characters,
@@ -400,6 +410,61 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
       masterPort: port,
       accessToken: token,
     ));
+  }
+
+  Future<void> _scanForMaster() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Scanning LAN…'),
+        duration: Duration(seconds: 4),
+      ),
+    );
+    final results = await MdnsScanner.scan();
+    if (!mounted) return;
+    messenger.hideCurrentSnackBar();
+    if (results.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No master found. Make sure both devices are on the same Wi-Fi '
+            'and the master tablet has Network mode set to Master.',
+          ),
+          duration: Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
+    final picked = results.length == 1
+        ? results.single
+        : await showDialog<DiscoveredMaster>(
+            context: navigator.context,
+            builder: (ctx) => SimpleDialog(
+              title: const Text('Found masters'),
+              children: [
+                for (final m in results)
+                  SimpleDialogOption(
+                    onPressed: () => Navigator.pop(ctx, m),
+                    child: Text(
+                        '${m.name}\n${m.host} : ${m.port}',
+                        style: const TextStyle(height: 1.4)),
+                  ),
+              ],
+            ),
+          );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _hostCtrl.text = picked.host;
+      _portCtrl.text = picked.port.toString();
+    });
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Filled in ${picked.host}:${picked.port}. '
+            'Enter the access code from the master tablet and tap Connect.'),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   Future<void> _rotateToken() async {

@@ -7,6 +7,7 @@ import 'package:network_info_plus/network_info_plus.dart';
 import '../data/database.dart';
 import '../data/repository.dart';
 import 'master_foreground_service.dart';
+import 'mdns.dart';
 import 'network_preferences.dart';
 import 'sync_applier.dart';
 import 'sync_client.dart';
@@ -149,6 +150,12 @@ class SyncEngine {
         hostAndPort: hostText,
         clients: 0,
       );
+      // Advertise the master over mDNS so clients/companion can auto-find it.
+      // Fire-and-forget — registration failure shouldn't kill the server.
+      unawaited(MdnsAdvertiser.instance.start(
+        port: cfg.masterPort,
+        deviceId: cfg.deviceId,
+      ));
 
       server.connectedClients.addListener(() {
         final count = server.connectedClients.value;
@@ -227,6 +234,7 @@ class SyncEngine {
   Future<void> _teardown() async {
     if (_server != null) {
       await MasterForegroundService.instance.stop();
+      await MdnsAdvertiser.instance.stop();
     }
     await _server?.stop();
     _server = null;
