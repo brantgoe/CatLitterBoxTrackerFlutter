@@ -30,6 +30,11 @@ class Rooms extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get syncId => text().clientDefault(_uuid).unique()();
   TextColumn get name => text()();
+
+  /// Cats living in this room. Drives the litter-change recommendation
+  /// per [LitterRecommender]. 0 means "unset" and disables the recommender.
+  IntColumn get catCount => integer().withDefault(const Constant(0))();
+
   IntColumn get updatedAt => integer().clientDefault(_nowMs)();
 }
 
@@ -117,7 +122,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withExecutor(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -172,6 +177,9 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 4) {
             await m.createTable(syncOutbox);
+          }
+          if (from < 5) {
+            await m.addColumn(rooms, rooms.catCount);
           }
         },
         beforeOpen: (details) async {
@@ -280,6 +288,14 @@ class AppDatabase extends _$AppDatabase {
 
   Future<List<CleaningEvent>> allEventsOnce() =>
       (select(cleaningEvents)
+            ..orderBy([(t) => OrderingTerm.desc(t.timestamp)]))
+          .get();
+
+  /// All cleaning events with `timestamp >= sinceMs`. Used by the litter
+  /// change recommender to compute the smell rate in a fixed window.
+  Future<List<CleaningEvent>> eventsSince(int sinceMs) =>
+      (select(cleaningEvents)
+            ..where((t) => t.timestamp.isBiggerOrEqualValue(sinceMs))
             ..orderBy([(t) => OrderingTerm.desc(t.timestamp)]))
           .get();
 

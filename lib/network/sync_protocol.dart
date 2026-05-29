@@ -14,6 +14,7 @@ class WireConverter {
   static WireRoom fromRoom(BoxRoom r) => WireRoom(
         syncId: r.syncId,
         name: r.name,
+        catCount: r.catCount,
         updatedAt: r.updatedAt,
       );
 
@@ -61,6 +62,7 @@ class WireConverter {
         id: localId == null ? const Value.absent() : Value(localId),
         syncId: Value(r.syncId),
         name: Value(r.name),
+        catCount: Value(r.catCount),
         updatedAt: Value(r.updatedAt),
       );
 

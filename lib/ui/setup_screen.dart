@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
+import '../services/litter_recommender.dart';
 import '../state/providers.dart';
 import 'box_config_screen.dart';
 
@@ -24,7 +25,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     final currentRoom = rooms.firstWhere(
       (r) => r.id == targetId,
       orElse: () => rooms.isEmpty
-          ? BoxRoom(id: 0, syncId: '', name: '', updatedAt: 0)
+          ? BoxRoom(id: 0, syncId: '', name: '', catCount: 0, updatedAt: 0)
           : rooms.first,
     );
 
@@ -86,6 +87,12 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
               ),
             ],
           ),
+          if (currentRoom.id != 0) ...[
+            const Divider(height: 32),
+            _CatCountStepper(room: currentRoom),
+            const SizedBox(height: 12),
+            _RecommendationCard(room: currentRoom),
+          ],
           const Divider(height: 32),
           Row(
             children: [
@@ -192,6 +199,154 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         builder: (_) => BoxConfigScreen(boxId: id),
       ));
     }
+  }
+}
+
+class _CatCountStepper extends ConsumerWidget {
+  const _CatCountStepper({required this.room});
+  final BoxRoom room;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cats = room.catCount;
+    return Row(
+      children: [
+        const Expanded(
+          child: Text(
+            'Cats living in this room',
+            style: TextStyle(fontSize: 16),
+          ),
+        ),
+        IconButton.outlined(
+          icon: const Icon(Icons.remove),
+          onPressed: cats <= 0
+              ? null
+              : () => ref
+                  .read(repositoryProvider)
+                  .updateRoom(room.copyWith(catCount: cats - 1)),
+        ),
+        SizedBox(
+          width: 40,
+          child: Text(
+            '$cats',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+        ),
+        IconButton.outlined(
+          icon: const Icon(Icons.add),
+          onPressed: cats >= 50
+              ? null
+              : () => ref
+                  .read(repositoryProvider)
+                  .updateRoom(room.copyWith(catCount: cats + 1)),
+        ),
+      ],
+    );
+  }
+}
+
+class _RecommendationCard extends ConsumerWidget {
+  const _RecommendationCard({required this.room});
+  final BoxRoom room;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final repo = ref.watch(repositoryProvider);
+    return StreamBuilder<List<LitterBox>>(
+      stream: repo.observeBoxesInRoom(room.id),
+      builder: (context, boxesSnap) {
+        final boxes = boxesSnap.data ?? const <LitterBox>[];
+        if (room.catCount <= 0 || boxes.isEmpty) {
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                room.catCount <= 0
+                    ? 'Tell me how many cats use this room and I\'ll '
+                        'suggest how often to change the litter.'
+                    : 'Add a box to this room to get a litter change '
+                        'recommendation.',
+                style: const TextStyle(color: Colors.grey),
+              ),
+            ),
+          );
+        }
+        // Pull events covering the smell-sample window. Refreshed via key on
+        // box ids so it re-fetches when boxes change.
+        final cutoff = DateTime.now().millisecondsSinceEpoch -
+            LitterRecommender.smellSampleWindow.inMilliseconds;
+        return FutureBuilder<List<CleaningEvent>>(
+          key: ValueKey('rec-${room.id}-${boxes.map((b) => b.id).join(",")}'),
+          future: repo.db.eventsSince(cutoff),
+          builder: (context, eventsSnap) {
+            final boxIds = boxes.map((b) => b.id).toSet();
+            final events = (eventsSnap.data ?? const <CleaningEvent>[])
+                .where((e) => boxIds.contains(e.boxId))
+                .toList();
+            final r = LitterRecommender.recommend(
+              cats: room.catCount,
+              boxes: boxes,
+              recentEvents: events,
+              nowMs: DateTime.now().millisecondsSinceEpoch,
+            );
+            return _recCard(r);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _recCard(LitterChangeRecommendation r) {
+    final shrank = r.days != r.baseDays;
+    final manualBoxes = r.boxes - r.automaticBoxes;
+    final loadParts = <String>[
+      if (manualBoxes > 0)
+        '$manualBoxes manual box${manualBoxes == 1 ? "" : "es"}',
+      if (r.automaticBoxes > 0)
+        '${r.automaticBoxes} automatic box${r.automaticBoxes == 1 ? "" : "es"}',
+    ];
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Suggested litter change',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 2),
+            Text(
+              'Every ${r.days} day${r.days == 1 ? "" : "s"}',
+              style: const TextStyle(
+                  fontSize: 22, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${r.cats} cat${r.cats == 1 ? "" : "s"} using ${loadParts.join(" + ")}.',
+              style: const TextStyle(fontSize: 13),
+            ),
+            if (shrank) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Baseline ${r.baseDays} day${r.baseDays == 1 ? "" : "s"}; '
+                'shaved off because ${(r.smellRate * 100).round()}% of recent '
+                'cleanings (${r.sampledEvents}) were due to smell.',
+                style: const TextStyle(
+                    fontSize: 12, color: Colors.orange),
+              ),
+            ] else if (r.sampledEvents >= LitterRecommender.smellMinSample &&
+                !r.smellRate.isNaN) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Smell rate (last 60 days): ${(r.smellRate * 100).round()}% '
+                'of ${r.sampledEvents} — within normal.',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 

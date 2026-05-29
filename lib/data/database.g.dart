@@ -41,6 +41,18 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _catCountMeta = const VerificationMeta(
+    'catCount',
+  );
+  @override
+  late final GeneratedColumn<int> catCount = GeneratedColumn<int>(
+    'cat_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _updatedAtMeta = const VerificationMeta(
     'updatedAt',
   );
@@ -54,7 +66,7 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
     clientDefault: _nowMs,
   );
   @override
-  List<GeneratedColumn> get $columns => [id, syncId, name, updatedAt];
+  List<GeneratedColumn> get $columns => [id, syncId, name, catCount, updatedAt];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -84,6 +96,12 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
     } else if (isInserting) {
       context.missing(_nameMeta);
     }
+    if (data.containsKey('cat_count')) {
+      context.handle(
+        _catCountMeta,
+        catCount.isAcceptableOrUnknown(data['cat_count']!, _catCountMeta),
+      );
+    }
     if (data.containsKey('updated_at')) {
       context.handle(
         _updatedAtMeta,
@@ -111,6 +129,10 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
         DriftSqlType.string,
         data['${effectivePrefix}name'],
       )!,
+      catCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}cat_count'],
+      )!,
       updatedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}updated_at'],
@@ -128,11 +150,16 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
   final int id;
   final String syncId;
   final String name;
+
+  /// Cats living in this room. Drives the litter-change recommendation
+  /// per [LitterRecommender]. 0 means "unset" and disables the recommender.
+  final int catCount;
   final int updatedAt;
   const BoxRoom({
     required this.id,
     required this.syncId,
     required this.name,
+    required this.catCount,
     required this.updatedAt,
   });
   @override
@@ -141,6 +168,7 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
     map['id'] = Variable<int>(id);
     map['sync_id'] = Variable<String>(syncId);
     map['name'] = Variable<String>(name);
+    map['cat_count'] = Variable<int>(catCount);
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
@@ -150,6 +178,7 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
       id: Value(id),
       syncId: Value(syncId),
       name: Value(name),
+      catCount: Value(catCount),
       updatedAt: Value(updatedAt),
     );
   }
@@ -163,6 +192,7 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
       id: serializer.fromJson<int>(json['id']),
       syncId: serializer.fromJson<String>(json['syncId']),
       name: serializer.fromJson<String>(json['name']),
+      catCount: serializer.fromJson<int>(json['catCount']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
@@ -173,22 +203,30 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
       'id': serializer.toJson<int>(id),
       'syncId': serializer.toJson<String>(syncId),
       'name': serializer.toJson<String>(name),
+      'catCount': serializer.toJson<int>(catCount),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
 
-  BoxRoom copyWith({int? id, String? syncId, String? name, int? updatedAt}) =>
-      BoxRoom(
-        id: id ?? this.id,
-        syncId: syncId ?? this.syncId,
-        name: name ?? this.name,
-        updatedAt: updatedAt ?? this.updatedAt,
-      );
+  BoxRoom copyWith({
+    int? id,
+    String? syncId,
+    String? name,
+    int? catCount,
+    int? updatedAt,
+  }) => BoxRoom(
+    id: id ?? this.id,
+    syncId: syncId ?? this.syncId,
+    name: name ?? this.name,
+    catCount: catCount ?? this.catCount,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
   BoxRoom copyWithCompanion(RoomsCompanion data) {
     return BoxRoom(
       id: data.id.present ? data.id.value : this.id,
       syncId: data.syncId.present ? data.syncId.value : this.syncId,
       name: data.name.present ? data.name.value : this.name,
+      catCount: data.catCount.present ? data.catCount.value : this.catCount,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
@@ -199,13 +237,14 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
           ..write('id: $id, ')
           ..write('syncId: $syncId, ')
           ..write('name: $name, ')
+          ..write('catCount: $catCount, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, syncId, name, updatedAt);
+  int get hashCode => Object.hash(id, syncId, name, catCount, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -213,6 +252,7 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
           other.id == this.id &&
           other.syncId == this.syncId &&
           other.name == this.name &&
+          other.catCount == this.catCount &&
           other.updatedAt == this.updatedAt);
 }
 
@@ -220,29 +260,34 @@ class RoomsCompanion extends UpdateCompanion<BoxRoom> {
   final Value<int> id;
   final Value<String> syncId;
   final Value<String> name;
+  final Value<int> catCount;
   final Value<int> updatedAt;
   const RoomsCompanion({
     this.id = const Value.absent(),
     this.syncId = const Value.absent(),
     this.name = const Value.absent(),
+    this.catCount = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
   RoomsCompanion.insert({
     this.id = const Value.absent(),
     this.syncId = const Value.absent(),
     required String name,
+    this.catCount = const Value.absent(),
     this.updatedAt = const Value.absent(),
   }) : name = Value(name);
   static Insertable<BoxRoom> custom({
     Expression<int>? id,
     Expression<String>? syncId,
     Expression<String>? name,
+    Expression<int>? catCount,
     Expression<int>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (syncId != null) 'sync_id': syncId,
       if (name != null) 'name': name,
+      if (catCount != null) 'cat_count': catCount,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
@@ -251,12 +296,14 @@ class RoomsCompanion extends UpdateCompanion<BoxRoom> {
     Value<int>? id,
     Value<String>? syncId,
     Value<String>? name,
+    Value<int>? catCount,
     Value<int>? updatedAt,
   }) {
     return RoomsCompanion(
       id: id ?? this.id,
       syncId: syncId ?? this.syncId,
       name: name ?? this.name,
+      catCount: catCount ?? this.catCount,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -273,6 +320,9 @@ class RoomsCompanion extends UpdateCompanion<BoxRoom> {
     if (name.present) {
       map['name'] = Variable<String>(name.value);
     }
+    if (catCount.present) {
+      map['cat_count'] = Variable<int>(catCount.value);
+    }
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
@@ -285,6 +335,7 @@ class RoomsCompanion extends UpdateCompanion<BoxRoom> {
           ..write('id: $id, ')
           ..write('syncId: $syncId, ')
           ..write('name: $name, ')
+          ..write('catCount: $catCount, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
@@ -2338,6 +2389,7 @@ typedef $$RoomsTableCreateCompanionBuilder =
       Value<int> id,
       Value<String> syncId,
       required String name,
+      Value<int> catCount,
       Value<int> updatedAt,
     });
 typedef $$RoomsTableUpdateCompanionBuilder =
@@ -2345,6 +2397,7 @@ typedef $$RoomsTableUpdateCompanionBuilder =
       Value<int> id,
       Value<String> syncId,
       Value<String> name,
+      Value<int> catCount,
       Value<int> updatedAt,
     });
 
@@ -2391,6 +2444,11 @@ class $$RoomsTableFilterComposer extends Composer<_$AppDatabase, $RoomsTable> {
 
   ColumnFilters<String> get name => $composableBuilder(
     column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get catCount => $composableBuilder(
+    column: $table.catCount,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2449,6 +2507,11 @@ class $$RoomsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get catCount => $composableBuilder(
+    column: $table.catCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
@@ -2472,6 +2535,9 @@ class $$RoomsTableAnnotationComposer
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<int> get catCount =>
+      $composableBuilder(column: $table.catCount, builder: (column) => column);
 
   GeneratedColumn<int> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
@@ -2533,11 +2599,13 @@ class $$RoomsTableTableManager
                 Value<int> id = const Value.absent(),
                 Value<String> syncId = const Value.absent(),
                 Value<String> name = const Value.absent(),
+                Value<int> catCount = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
               }) => RoomsCompanion(
                 id: id,
                 syncId: syncId,
                 name: name,
+                catCount: catCount,
                 updatedAt: updatedAt,
               ),
           createCompanionCallback:
@@ -2545,11 +2613,13 @@ class $$RoomsTableTableManager
                 Value<int> id = const Value.absent(),
                 Value<String> syncId = const Value.absent(),
                 required String name,
+                Value<int> catCount = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
               }) => RoomsCompanion.insert(
                 id: id,
                 syncId: syncId,
                 name: name,
+                catCount: catCount,
                 updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0
