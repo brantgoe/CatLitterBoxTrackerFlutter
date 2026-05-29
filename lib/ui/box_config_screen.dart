@@ -185,41 +185,101 @@ class _BoxConfigScreenState extends ConsumerState<BoxConfigScreen> {
   }
 
   Future<void> _confirmLoadPreset(Repository repo) async {
+    // The currently-saved brand/model on the box — what the maintenance list
+    // was previously seeded for, if anything. Lets us recognize leftover
+    // tasks from a previous preset by name and clear them out instead of
+    // piling new items on top.
+    final previousPreset =
+        BoxPresets.match(_box?.brand ?? '', _box?.model ?? '');
+    final tasks = await repo.db.tasksForBoxOnce(widget.boxId);
+    final existingNames =
+        tasks.map<String>((t) => t.name.trim().toLowerCase()).toSet();
+
+    final leftover = previousPreset.displayName != _preset.displayName
+        ? tasks.where((t) {
+            final n = t.name.trim().toLowerCase();
+            return previousPreset.maintenanceItems
+                .any((p) => p.name.trim().toLowerCase() == n);
+          }).toList()
+        : <MaintenanceTask>[];
+
+    final newToAdd = _preset.maintenanceItems
+        .where((p) => !existingNames.contains(p.name.trim().toLowerCase()) ||
+            leftover.any((t) =>
+                t.name.trim().toLowerCase() ==
+                p.name.trim().toLowerCase()))
+        .toList();
+
+    if (!mounted) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Load preset maintenance items?'),
-        content: const Text(
-            'This appends the preset items for this model to your maintenance list (existing items are kept).'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (leftover.isNotEmpty) ...[
+              Text(
+                'Will remove ${leftover.length} leftover item(s) from the '
+                'previous "${previousPreset.displayName}" preset:',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              for (final t in leftover) Text('• ${t.name}'),
+              const SizedBox(height: 12),
+            ],
+            Text(
+              newToAdd.isEmpty
+                  ? 'No new items to add — all "${_preset.displayName}" '
+                      'items are already in your list.'
+                  : 'Will add ${newToAdd.length} item(s) from '
+                      '"${_preset.displayName}":',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            if (newToAdd.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              for (final p in newToAdd) Text('• ${p.name}'),
+            ],
+            const SizedBox(height: 12),
+            const Text(
+              'Items you added yourself are kept.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('CANCEL')),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('LOAD')),
+              child: const Text('APPLY')),
         ],
       ),
     );
     if (confirm != true) return;
-    final tasks = await repo.db.tasksForBoxOnce(widget.boxId);
-    final existing = tasks
-        .map<String>((t) => t.name.trim().toLowerCase())
-        .toSet();
-    var added = 0;
-    for (final p in _preset.maintenanceItems) {
-      if (existing.contains(p.name.trim().toLowerCase())) continue;
+
+    for (final t in leftover) {
+      await repo.deleteMaintenanceTask(t);
+    }
+    for (final p in newToAdd) {
       await repo.addMaintenanceTask(MaintenanceTasksCompanion.insert(
         boxId: widget.boxId,
         name: p.name,
         intervalCleanings: p.intervalCleanings,
         anchorTimestamp: DateTime.now().millisecondsSinceEpoch,
       ));
-      added++;
     }
     if (mounted) {
+      final removed = leftover.length;
+      final added = newToAdd.length;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Loaded $added preset maintenance items')),
+        SnackBar(
+          content: Text(removed > 0
+              ? 'Removed $removed leftover item(s), added $added new'
+              : 'Added $added preset maintenance item(s)'),
+        ),
       );
     }
   }
