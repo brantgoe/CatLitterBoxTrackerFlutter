@@ -111,8 +111,8 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                'Standalone mode. This device keeps its own data and does '
-                'not sync with anything else.',
+                'Solo mode. This tablet keeps its own data and does not '
+                'share with anything else.',
                 style: TextStyle(color: AppColors.textSecondary),
               ),
             ),
@@ -185,7 +185,8 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'This device hosts the server. Other devices connect to it.',
+          'This tablet hosts the shared data. Other tablets and the phone '
+          'companion connect to it and stay in sync.',
           style: TextStyle(color: AppColors.textSecondary),
         ),
         const SizedBox(height: 12),
@@ -196,7 +197,7 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Tell other devices to connect to:'),
+                  const Text('Other tablets and your phone connect to:'),
                   const SizedBox(height: 4),
                   Text(
                     '$_wifiIp : ${cfg.masterPort}',
@@ -207,7 +208,7 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text('Access code (clients must enter this):'),
+                  const Text('Access code — other devices need this to join:'),
                   const SizedBox(height: 4),
                   Row(
                     children: [
@@ -258,8 +259,9 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'This device joins a Master. Switching to client mode will '
-          'replace local data with the Master\'s snapshot.',
+          'This tablet joins another tablet that hosts the shared data. '
+          'Switching to client mode replaces this tablet\'s data with the '
+          'host\'s.',
           style: TextStyle(color: AppColors.textSecondary),
         ),
         const SizedBox(height: 12),
@@ -267,7 +269,7 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
           controller: _hostCtrl,
           keyboardType: TextInputType.url,
           decoration: const InputDecoration(
-            labelText: 'Master IP / hostname',
+            labelText: 'Host tablet IP / hostname',
             hintText: 'e.g. 192.168.1.42',
           ),
         ),
@@ -286,14 +288,14 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
           textCapitalization: TextCapitalization.characters,
           decoration: const InputDecoration(
             labelText: 'Access code',
-            hintText: 'Shown on the master tablet',
+            hintText: 'Shown on the host tablet',
           ),
         ),
         const SizedBox(height: 8),
         TextField(
           controller: _portCtrl,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Master port'),
+          decoration: const InputDecoration(labelText: 'Host port'),
         ),
         const SizedBox(height: 12),
         FilledButton.icon(
@@ -320,8 +322,8 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Once this device connects to a master, the master\'s data '
-                'will replace whatever is on this tablet.',
+                'Once this tablet connects to the host tablet, the host\'s '
+                'data will replace whatever is on this tablet.',
               ),
               const SizedBox(height: 12),
               if (overview.hasAny) ...[
@@ -336,8 +338,8 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
                 Text('• ${overview.tasks} maintenance task(s)'),
                 const SizedBox(height: 8),
                 const Text(
-                  'All of it will be discarded if anything on the master '
-                  'differs. Make sure you have the right master IP first.',
+                  'All of it will be discarded if anything on the host '
+                  'differs. Make sure you have the right host IP first.',
                   style: TextStyle(color: AppColors.statusWarn),
                 ),
               ] else
@@ -392,7 +394,7 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
     final token = _tokenCtrl.text.trim().toUpperCase();
     if (host.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter the master IP first')),
+        const SnackBar(content: Text('Enter the host tablet IP first')),
       );
       return;
     }
@@ -473,8 +475,9 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Rotate access code?'),
         content: const Text(
-            'A new code will be generated. Every client will need to be '
-            're-entered with the new code before it can sync again.'),
+            'A new code will be generated. Every other tablet and the phone '
+            'companion will need to be re-entered with the new code before '
+            'they can sync again.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
