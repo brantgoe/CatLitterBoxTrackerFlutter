@@ -117,12 +117,20 @@ class SyncEngine {
 
   Future<void> _startMaster(NetworkConfig cfg) async {
     status.value = SyncEngineStatus(role: cfg.role, status: SyncStatus.starting);
+    // Auto-generate an access token the first time we become master so the
+    // master is never accidentally unauthenticated.
+    if (cfg.accessToken.isEmpty) {
+      final token = NetworkPreferences.generateToken();
+      await prefs.update(cfg.copyWith(accessToken: token));
+      return; // _onPrefsChanged will re-fire _applyConfig with the new token.
+    }
     try {
       final server = SyncServer(
         db: db,
         repository: repository,
         deviceId: cfg.deviceId,
         port: cfg.masterPort,
+        accessToken: cfg.accessToken,
       );
       await server.start();
       _server = server;
@@ -163,6 +171,7 @@ class SyncEngine {
         deviceId: cfg.deviceId,
         host: cfg.masterHost,
         port: cfg.masterPort,
+        accessToken: cfg.accessToken,
       );
       client.state.addListener(() {
         status.value = status.value.copyWith(

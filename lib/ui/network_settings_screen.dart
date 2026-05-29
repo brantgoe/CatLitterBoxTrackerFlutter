@@ -20,6 +20,7 @@ class NetworkSettingsScreen extends ConsumerStatefulWidget {
 class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
   late TextEditingController _hostCtrl;
   late TextEditingController _portCtrl;
+  late TextEditingController _tokenCtrl;
   String? _wifiIp;
   SyncOverview? _lastShownSnapshot;
   VoidCallback? _snapshotListener;
@@ -30,6 +31,7 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
     final cfg = ref.read(networkConfigProvider);
     _hostCtrl = TextEditingController(text: cfg.masterHost);
     _portCtrl = TextEditingController(text: cfg.masterPort.toString());
+    _tokenCtrl = TextEditingController(text: cfg.accessToken);
     _loadWifiIp();
     _attachSnapshotListener();
   }
@@ -72,6 +74,7 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
     }
     _hostCtrl.dispose();
     _portCtrl.dispose();
+    _tokenCtrl.dispose();
     super.dispose();
   }
 
@@ -202,6 +205,29 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  const Text('Access code (clients must enter this):'),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SelectableText(
+                          cfg.accessToken.isEmpty ? '—' : cfg.accessToken,
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 4,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        tooltip: 'Rotate access code',
+                        onPressed: _rotateToken,
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -242,6 +268,15 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
           decoration: const InputDecoration(
             labelText: 'Master IP / hostname',
             hintText: 'e.g. 192.168.1.42',
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _tokenCtrl,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(
+            labelText: 'Access code',
+            hintText: 'Shown on the master tablet',
           ),
         ),
         const SizedBox(height: 8),
@@ -344,6 +379,7 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
     final cfg = ref.read(networkConfigProvider);
     final host = _hostCtrl.text.trim();
     final port = int.tryParse(_portCtrl.text) ?? NetworkPreferences.defaultPort;
+    final token = _tokenCtrl.text.trim().toUpperCase();
     if (host.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter the master IP first')),
@@ -355,12 +391,39 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
       role: DeviceRole.standalone,
       masterHost: host,
       masterPort: port,
+      accessToken: token,
     ));
     await Future<void>.delayed(const Duration(milliseconds: 50));
     await notifier.update(cfg.copyWith(
       role: DeviceRole.client,
       masterHost: host,
       masterPort: port,
+      accessToken: token,
     ));
+  }
+
+  Future<void> _rotateToken() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rotate access code?'),
+        content: const Text(
+            'A new code will be generated. Every client will need to be '
+            're-entered with the new code before it can sync again.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('CANCEL')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('ROTATE')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final cfg = ref.read(networkConfigProvider);
+    await ref
+        .read(networkConfigProvider.notifier)
+        .update(cfg.copyWith(accessToken: NetworkPreferences.generateToken()));
   }
 }

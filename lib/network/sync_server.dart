@@ -26,12 +26,14 @@ class SyncServer {
     required this.repository,
     required this.deviceId,
     required this.port,
+    required this.accessToken,
   }) : _applier = SyncApplier(db);
 
   final AppDatabase db;
   final Repository repository;
   final String deviceId;
   final int port;
+  final String accessToken;
 
   final SyncApplier _applier;
   HttpServer? _httpServer;
@@ -96,6 +98,19 @@ class SyncServer {
           final type = m['type'] as String?;
           if (type == MsgType.hello) {
             clientDeviceId = m['deviceId'] as String? ?? 'unknown';
+            // Verify access token. Empty server-side token disables auth
+            // (kept for legacy installs that pre-dated the feature).
+            if (accessToken.isNotEmpty) {
+              final claimed = m['accessToken'] as String? ?? '';
+              if (claimed != accessToken) {
+                channel.sink.add(jsonEncode(
+                    SyncMessages.reject(reason: 'invalid_access_token')));
+                await channel.sink.close();
+                _clients.removeWhere((c) => identical(c.channel, channel));
+                connectedClients.value = _clients.length;
+                return;
+              }
+            }
             // Re-key the client.
             _clients.remove(client);
             final identified = _ConnectedClient(clientDeviceId!, channel);

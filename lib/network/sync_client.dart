@@ -20,6 +20,7 @@ class SyncClient {
     required this.deviceId,
     required this.host,
     required this.port,
+    required this.accessToken,
   }) : _applier = SyncApplier(db);
 
   final AppDatabase db;
@@ -27,6 +28,7 @@ class SyncClient {
   final String deviceId;
   final String host;
   final int port;
+  final String accessToken;
 
   final SyncApplier _applier;
   WebSocketChannel? _channel;
@@ -70,6 +72,7 @@ class SyncClient {
 
       _channel!.sink.add(jsonEncode(SyncMessages.hello(
         deviceId: deviceId,
+        accessToken: accessToken.isEmpty ? null : accessToken,
       )));
 
       _outboxSub = repository.outbox.listen(_sendOutbox);
@@ -116,6 +119,11 @@ class SyncClient {
       switch (type) {
         case MsgType.welcome:
           // Nothing to do for now; could capture serverTime for clock skew.
+          break;
+        case MsgType.reject:
+          errorMessage.value =
+              'Master rejected: ${m['reason'] ?? 'unknown'}';
+          await stop(); // do not auto-reconnect on auth failure
           break;
         case MsgType.snapshot:
           await _applier.applySnapshot(m);

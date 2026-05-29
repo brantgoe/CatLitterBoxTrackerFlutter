@@ -11,6 +11,7 @@ class NetworkConfig {
     required this.masterPort,
     required this.ownedRoomId,
     required this.deviceId,
+    required this.accessToken,
   });
 
   final DeviceRole role;
@@ -19,12 +20,19 @@ class NetworkConfig {
   final int? ownedRoomId;
   final String deviceId;
 
+  /// Shared secret. When this device is the master, incoming clients must
+  /// present this exact token in their hello message. When this device is a
+  /// client, this is the token sent to the master. Empty string means
+  /// "no auth required" — set on legacy installs that pre-dated this feature.
+  final String accessToken;
+
   NetworkConfig copyWith({
     DeviceRole? role,
     String? masterHost,
     int? masterPort,
     Object? ownedRoomId = _sentinel,
     String? deviceId,
+    String? accessToken,
   }) {
     return NetworkConfig(
       role: role ?? this.role,
@@ -34,6 +42,7 @@ class NetworkConfig {
           ? this.ownedRoomId
           : ownedRoomId as int?,
       deviceId: deviceId ?? this.deviceId,
+      accessToken: accessToken ?? this.accessToken,
     );
   }
 }
@@ -50,6 +59,7 @@ class NetworkPreferences {
   static const _kMasterPort = 'net_master_port';
   static const _kOwnedRoomId = 'net_owned_room_id';
   static const _kDeviceId = 'net_device_id';
+  static const _kAccessToken = 'net_access_token';
   static const defaultPort = 4421;
 
   final SharedPreferences _prefs;
@@ -65,7 +75,22 @@ class NetworkPreferences {
         masterPort: defaultPort,
         ownedRoomId: null,
         deviceId: '',
+        accessToken: '',
       );
+
+  /// Generate a short, human-typable shared secret (6 chars, base32-ish).
+  /// 6 chars from this alphabet is ~30 bits — plenty for a single LAN.
+  static String generateToken() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final r = DateTime.now().microsecondsSinceEpoch;
+    final buf = StringBuffer();
+    var seed = r;
+    for (var i = 0; i < 6; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      buf.write(alphabet[seed % alphabet.length]);
+    }
+    return buf.toString();
+  }
 
   void _load() {
     final role = DeviceRole.values.firstWhere(
@@ -86,6 +111,7 @@ class NetworkPreferences {
       masterPort: port,
       ownedRoomId: ownedRoomId,
       deviceId: deviceId,
+      accessToken: _prefs.getString(_kAccessToken) ?? '',
     );
   }
 
@@ -99,6 +125,7 @@ class NetworkPreferences {
       await _prefs.setInt(_kOwnedRoomId, config.ownedRoomId!);
     }
     await _prefs.setString(_kDeviceId, config.deviceId);
+    await _prefs.setString(_kAccessToken, config.accessToken);
     _config.value = config;
   }
 }
