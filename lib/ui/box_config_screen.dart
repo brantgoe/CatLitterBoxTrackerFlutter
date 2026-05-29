@@ -137,7 +137,7 @@ class _BoxConfigScreenState extends ConsumerState<BoxConfigScreen> {
               ),
               if (_type == BoxTypeKind.automatic) ...[
                 const SizedBox(height: 24),
-                const Text('Brand'),
+                const Text('Manufacturer'),
                 DropdownButton<String>(
                   value: _brand,
                   isExpanded: true,
