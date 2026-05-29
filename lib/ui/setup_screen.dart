@@ -6,26 +6,23 @@ import '../data/database.dart';
 import '../state/providers.dart';
 import 'box_config_screen.dart';
 
-class _SelectedRoomNotifier extends Notifier<int?> {
-  @override
-  int? build() => null;
-
-  void set(int? id) => state = id;
-}
-
-final _selectedSetupRoomIdProvider =
-    NotifierProvider<_SelectedRoomNotifier, int?>(_SelectedRoomNotifier.new);
-
-class SetupScreen extends ConsumerWidget {
+class SetupScreen extends ConsumerStatefulWidget {
   const SetupScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SetupScreen> createState() => _SetupScreenState();
+}
+
+class _SetupScreenState extends ConsumerState<SetupScreen> {
+  int? _selectedRoomId;
+
+  @override
+  Widget build(BuildContext context) {
     final rooms = ref.watch(roomsProvider).value ?? const [];
     final activeRoom = ref.watch(activeRoomProvider).value;
-    final selected = ref.watch(_selectedSetupRoomIdProvider);
+    final targetId = _selectedRoomId ?? activeRoom?.id;
     final currentRoom = rooms.firstWhere(
-      (r) => r.id == (selected ?? activeRoom?.id),
+      (r) => r.id == targetId,
       orElse: () => rooms.isEmpty
           ? BoxRoom(id: 0, name: '')
           : rooms.first,
@@ -61,9 +58,7 @@ class SetupScreen extends ConsumerWidget {
                       child: Text(r.name),
                     ))
                 .toList(),
-            onChanged: (id) {
-              ref.read(_selectedSetupRoomIdProvider.notifier).set(id);
-            },
+            onChanged: (id) => setState(() => _selectedRoomId = id),
           ),
           const SizedBox(height: 8),
           Row(
@@ -71,7 +66,7 @@ class SetupScreen extends ConsumerWidget {
               OutlinedButton.icon(
                 icon: const Icon(Icons.add),
                 label: const Text('New room'),
-                onPressed: () => _promptCreateRoom(context, ref),
+                onPressed: _promptCreateRoom,
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
@@ -79,7 +74,7 @@ class SetupScreen extends ConsumerWidget {
                 label: const Text('Rename'),
                 onPressed: currentRoom.id == 0
                     ? null
-                    : () => _promptRenameRoom(context, ref, currentRoom),
+                    : () => _promptRenameRoom(currentRoom),
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
@@ -87,7 +82,7 @@ class SetupScreen extends ConsumerWidget {
                 label: const Text('Delete'),
                 onPressed: rooms.length <= 1 || currentRoom.id == 0
                     ? null
-                    : () => _confirmDeleteRoom(context, ref, currentRoom),
+                    : () => _confirmDeleteRoom(currentRoom),
               ),
             ],
           ),
@@ -100,7 +95,7 @@ class SetupScreen extends ConsumerWidget {
                 label: const Text('Add Box'),
                 onPressed: currentRoom.id == 0
                     ? null
-                    : () => _addBoxAndOpen(context, ref, currentRoom.id),
+                    : () => _addBoxAndOpen(currentRoom.id),
               ),
             ],
           ),
@@ -112,7 +107,7 @@ class SetupScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _promptCreateRoom(BuildContext context, WidgetRef ref) async {
+  Future<void> _promptCreateRoom() async {
     final controller = TextEditingController(text: 'Unnamed Room');
     final name = await showDialog<String>(
       context: context,
@@ -131,15 +126,14 @@ class SetupScreen extends ConsumerWidget {
         ],
       ),
     );
-    if (name == null || name.isEmpty) return;
+    if (name == null || name.isEmpty || !mounted) return;
     final repo = ref.read(repositoryProvider);
     final id = await repo.insertRoom(name);
-    ref.read(_selectedSetupRoomIdProvider.notifier).set(id);
     repo.setActiveRoomId(id);
+    if (mounted) setState(() => _selectedRoomId = id);
   }
 
-  Future<void> _promptRenameRoom(
-      BuildContext context, WidgetRef ref, BoxRoom room) async {
+  Future<void> _promptRenameRoom(BoxRoom room) async {
     final controller = TextEditingController(text: room.name);
     final name = await showDialog<String>(
       context: context,
@@ -164,8 +158,7 @@ class SetupScreen extends ConsumerWidget {
         .updateRoom(room.copyWith(name: name));
   }
 
-  Future<void> _confirmDeleteRoom(
-      BuildContext context, WidgetRef ref, BoxRoom room) async {
+  Future<void> _confirmDeleteRoom(BoxRoom room) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -184,19 +177,17 @@ class SetupScreen extends ConsumerWidget {
         ],
       ),
     );
-    if (confirm == true) {
-      await ref.read(repositoryProvider).deleteRoom(room);
-      ref.read(_selectedSetupRoomIdProvider.notifier).set(null);
-    }
+    if (confirm != true || !mounted) return;
+    await ref.read(repositoryProvider).deleteRoom(room);
+    if (mounted) setState(() => _selectedRoomId = null);
   }
 
-  Future<void> _addBoxAndOpen(
-      BuildContext context, WidgetRef ref, int roomId) async {
+  Future<void> _addBoxAndOpen(int roomId) async {
     final repo = ref.read(repositoryProvider);
     final id = await repo.insertBox(
       LitterBoxesCompanion.insert(name: 'New box', roomId: Value(roomId)),
     );
-    if (context.mounted) {
+    if (mounted) {
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => BoxConfigScreen(boxId: id),
       ));

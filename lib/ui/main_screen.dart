@@ -29,6 +29,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   Widget build(BuildContext context) {
     final statesAsync = ref.watch(boxStatesProvider);
     final room = ref.watch(activeRoomProvider).value;
+    // Keep roomsProvider subscribed so the switcher dialog has data ready.
+    ref.watch(roomsProvider);
     final states = statesAsync.value ?? const [];
 
     return Scaffold(
