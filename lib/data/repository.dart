@@ -1,11 +1,32 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../network/sync_protocol.dart';
 import 'database.dart';
 
 enum MaintenanceSortMode { upNext, byTask }
+
+/// An outbox event emitted whenever the local repository mutates the DB.
+/// The sync engine subscribes to these and forwards over the wire.
+class OutboxEvent {
+  OutboxEvent.upsert(this.kind, this.payload)
+      : op = OutboxOp.upsert,
+        id = null;
+  OutboxEvent.delete(this.kind, this.id)
+      : op = OutboxOp.delete,
+        payload = null;
+
+  final OutboxOp op;
+  final EntityKind kind;
+  final Map<String, dynamic>? payload;
+  final int? id;
+}
+
+enum OutboxOp { upsert, delete }
 
 class Repository {
   Repository(this.db, this._prefs) {
@@ -25,6 +46,9 @@ class Repository {
 
   final AppDatabase db;
   final SharedPreferences _prefs;
+
+  final _outboxController = StreamController<OutboxEvent>.broadcast();
+  Stream<OutboxEvent> get outbox => _outboxController.stream;
 
   final ValueNotifier<int?> _activeRoomId = ValueNotifier<int?>(null);
   ValueListenable<int?> get activeRoomId => _activeRoomId;
@@ -92,15 +116,17 @@ class Repository {
     int boxId, {
     int? timestamp,
     bool? dueToSmell,
-  }) {
+  }) async {
     final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch;
-    return db.insertEvent(
+    final id = await db.insertEvent(
       CleaningEventsCompanion.insert(
         boxId: boxId,
         timestamp: ts,
         dueToSmell: Value(dueToSmell),
       ),
     );
+    await _emitUpsertEvent(id);
+    return id;
   }
 
   Future<List<int>> logCleaningInRoom(
@@ -120,6 +146,7 @@ class Repository {
     final existing = await db.eventById(eventId);
     if (existing == null) return;
     await db.updateEvent(existing.copyWith(dueToSmell: Value(dueToSmell)));
+    await _emitUpsertEvent(eventId);
   }
 
   Future<void> updateCleaningSmellForRoom(
@@ -131,29 +158,50 @@ class Repository {
     }
   }
 
-  Future<int> reinsertCleaning(CleaningEvent event) =>
-      db.insertEvent(CleaningEventsCompanion.insert(
-        boxId: event.boxId,
-        timestamp: event.timestamp,
-        dueToSmell: Value(event.dueToSmell),
-      ));
+  Future<int> reinsertCleaning(CleaningEvent event) async {
+    final id = await db.insertEvent(CleaningEventsCompanion.insert(
+      boxId: event.boxId,
+      timestamp: event.timestamp,
+      dueToSmell: Value(event.dueToSmell),
+    ));
+    await _emitUpsertEvent(id);
+    return id;
+  }
 
-  Future<void> deleteCleaning(CleaningEvent event) => db.deleteEvent(event);
+  Future<void> deleteCleaning(CleaningEvent event) async {
+    await db.deleteEvent(event);
+    _outboxController.add(OutboxEvent.delete(EntityKind.event, event.id));
+  }
 
-  Future<void> deleteCleaningsByIds(List<int> ids) =>
-      db.deleteEventsByIds(ids);
+  Future<void> deleteCleaningsByIds(List<int> ids) async {
+    await db.deleteEventsByIds(ids);
+    for (final id in ids) {
+      _outboxController.add(OutboxEvent.delete(EntityKind.event, id));
+    }
+  }
 
-  Future<void> updateBox(LitterBox box) => db.updateBox(box);
+  Future<void> updateBox(LitterBox box) async {
+    await db.updateBox(box);
+    await _emitUpsertBox(box.id);
+  }
 
-  Future<int> insertBox(LitterBoxesCompanion box) => db.insertBox(box);
+  Future<int> insertBox(LitterBoxesCompanion box) async {
+    final id = await db.insertBox(box);
+    await _emitUpsertBox(id);
+    return id;
+  }
 
-  Future<void> deleteBox(LitterBox box) => db.deleteBox(box);
+  Future<void> deleteBox(LitterBox box) async {
+    await db.deleteBox(box);
+    _outboxController.add(OutboxEvent.delete(EntityKind.box, box.id));
+  }
 
   Future<BoxRoom> ensureRoomExists() async {
     final first = await db.firstRoomOrNull();
     if (first != null) return first;
     final id = await db.insertRoom('Main');
-    return BoxRoom(id: id, name: 'Main');
+    await _emitUpsertRoom(id);
+    return (await db.roomById(id))!;
   }
 
   Future<LitterBox> ensureBoxExists() async {
@@ -164,15 +212,24 @@ class Repository {
       name: 'Litter Box',
       roomId: Value(room.id),
     ));
+    await _emitUpsertBox(id);
     return (await db.boxById(id))!;
   }
 
-  Future<void> updateRoom(BoxRoom room) => db.updateRoomEntity(room);
+  Future<void> updateRoom(BoxRoom room) async {
+    await db.updateRoomEntity(room);
+    await _emitUpsertRoom(room.id);
+  }
 
-  Future<int> insertRoom(String name) => db.insertRoom(name);
+  Future<int> insertRoom(String name) async {
+    final id = await db.insertRoom(name);
+    await _emitUpsertRoom(id);
+    return id;
+  }
 
   Future<void> deleteRoom(BoxRoom room) async {
     await db.deleteRoomEntity(room);
+    _outboxController.add(OutboxEvent.delete(EntityKind.room, room.id));
     if (_activeRoomId.value == room.id) setActiveRoomId(null);
   }
 
@@ -196,14 +253,21 @@ class Repository {
         }
       }
     }
-    return db.insertTask(task.copyWith(offsetCleanings: Value(stagger)));
+    final id =
+        await db.insertTask(task.copyWith(offsetCleanings: Value(stagger)));
+    await _emitUpsertTask(id);
+    return id;
   }
 
-  Future<void> updateMaintenanceTask(MaintenanceTask task) =>
-      db.updateTask(task);
+  Future<void> updateMaintenanceTask(MaintenanceTask task) async {
+    await db.updateTask(task);
+    await _emitUpsertTask(task.id);
+  }
 
-  Future<void> deleteMaintenanceTask(MaintenanceTask task) =>
-      db.deleteTask(task);
+  Future<void> deleteMaintenanceTask(MaintenanceTask task) async {
+    await db.deleteTask(task);
+    _outboxController.add(OutboxEvent.delete(EntityKind.task, task.id));
+  }
 
   Future<void> markMaintenanceComplete(int taskId, {int? now}) async {
     final task = await db.taskById(taskId);
@@ -212,19 +276,30 @@ class Repository {
       anchorTimestamp: now ?? DateTime.now().millisecondsSinceEpoch,
       offsetCleanings: 0,
     ));
+    await _emitUpsertTask(taskId);
   }
 
   Future<void> setLastCleaningTimestamp(int boxId, int timestamp) async {
     final existing = await db.mostRecent(boxId);
     if (existing == null) {
-      await db.insertEvent(CleaningEventsCompanion.insert(
+      final id = await db.insertEvent(CleaningEventsCompanion.insert(
         boxId: boxId,
         timestamp: timestamp,
       ));
+      await _emitUpsertEvent(id);
       return;
     }
     final delta = timestamp - existing.timestamp;
-    if (delta != 0) await db.shiftTimestamps(boxId, delta);
+    if (delta != 0) {
+      await db.shiftTimestamps(boxId, delta);
+      // Re-emit all events for the box since timestamps changed.
+      final events = await db.observeEventsForBox(boxId).first;
+      for (final e in events) {
+        _outboxController.add(
+          OutboxEvent.upsert(EntityKind.event, EntityCodec.eventToJson(e)),
+        );
+      }
+    }
   }
 
   Future<int> cleaningsSinceAnchor(int boxId, int anchor) =>
@@ -237,5 +312,50 @@ class Repository {
     await db.updateTask(task.copyWith(
       intervalCleanings: count.clamp(0, 999999),
     ));
+    await _emitUpsertTask(taskId);
+  }
+
+  Future<void> _emitUpsertRoom(int id) async {
+    final r = await db.roomById(id);
+    if (r != null) {
+      _outboxController.add(
+          OutboxEvent.upsert(EntityKind.room, EntityCodec.roomToJson(r)));
+    }
+  }
+
+  Future<void> _emitUpsertBox(int id) async {
+    final b = await db.boxById(id);
+    if (b != null) {
+      _outboxController.add(
+          OutboxEvent.upsert(EntityKind.box, EntityCodec.boxToJson(b)));
+    }
+  }
+
+  Future<void> _emitUpsertEvent(int id) async {
+    final e = await db.eventById(id);
+    if (e != null) {
+      _outboxController.add(
+          OutboxEvent.upsert(EntityKind.event, EntityCodec.eventToJson(e)));
+    }
+  }
+
+  Future<void> _emitUpsertTask(int id) async {
+    final t = await db.taskById(id);
+    if (t != null) {
+      _outboxController.add(
+          OutboxEvent.upsert(EntityKind.task, EntityCodec.taskToJson(t)));
+    }
+  }
+
+  /// Wipe the entire local database. Used when joining a network as a
+  /// client; the master's snapshot replaces local state.
+  Future<void> wipeAll() async {
+    await db.transaction(() async {
+      await db.delete(db.cleaningEvents).go();
+      await db.delete(db.maintenanceTasks).go();
+      await db.delete(db.litterBoxes).go();
+      await db.delete(db.rooms).go();
+    });
+    setActiveRoomId(null);
   }
 }

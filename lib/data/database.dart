@@ -17,6 +17,8 @@ extension BoxTypeKindStorage on BoxTypeKind {
       };
 }
 
+int _nowMs() => DateTime.now().millisecondsSinceEpoch;
+
 @DataClassName('BoxRoom')
 class Rooms extends Table {
   @override
@@ -24,6 +26,7 @@ class Rooms extends Table {
 
   IntColumn get id => integer().autoIncrement()();
   TextColumn get name => text()();
+  IntColumn get updatedAt => integer().clientDefault(_nowMs)();
 }
 
 @DataClassName('LitterBox')
@@ -42,6 +45,7 @@ class LitterBoxes extends Table {
   IntColumn get roomId => integer()
       .nullable()
       .references(Rooms, #id, onDelete: KeyAction.setNull)();
+  IntColumn get updatedAt => integer().clientDefault(_nowMs)();
 }
 
 @DataClassName('CleaningEvent')
@@ -54,6 +58,7 @@ class CleaningEvents extends Table {
       integer().references(LitterBoxes, #id, onDelete: KeyAction.cascade)();
   IntColumn get timestamp => integer()();
   BoolColumn get dueToSmell => boolean().nullable()();
+  IntColumn get updatedAt => integer().clientDefault(_nowMs)();
 }
 
 @DataClassName('MaintenanceTask')
@@ -69,6 +74,7 @@ class MaintenanceTasks extends Table {
   IntColumn get anchorTimestamp => integer()();
   BoolColumn get enabled => boolean().withDefault(const Constant(true))();
   IntColumn get offsetCleanings => integer().withDefault(const Constant(0))();
+  IntColumn get updatedAt => integer().clientDefault(_nowMs)();
 }
 
 extension LitterBoxX on LitterBox {
@@ -82,7 +88,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(driftDatabase(name: 'litter_tracker'));
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -97,6 +103,14 @@ class AppDatabase extends _$AppDatabase {
               roomId: Value(roomId),
             ),
           );
+        },
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.addColumn(rooms, rooms.updatedAt);
+            await m.addColumn(litterBoxes, litterBoxes.updatedAt);
+            await m.addColumn(cleaningEvents, cleaningEvents.updatedAt);
+            await m.addColumn(maintenanceTasks, maintenanceTasks.updatedAt);
+          }
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON;');
@@ -118,11 +132,14 @@ class AppDatabase extends _$AppDatabase {
   Future<BoxRoom?> roomById(int id) =>
       (select(rooms)..where((t) => t.id.equals(id))).getSingleOrNull();
 
+  Future<List<BoxRoom>> allRoomsOnce() =>
+      (select(rooms)..orderBy([(t) => OrderingTerm.asc(t.id)])).get();
+
   Future<int> insertRoom(String name) =>
       into(rooms).insert(RoomsCompanion.insert(name: name));
 
   Future<void> updateRoomEntity(BoxRoom room) =>
-      update(rooms).replace(room);
+      update(rooms).replace(room.copyWith(updatedAt: _nowMs()));
 
   Future<void> deleteRoomEntity(BoxRoom room) =>
       (delete(rooms)..where((t) => t.id.equals(room.id))).go();
@@ -152,6 +169,13 @@ class AppDatabase extends _$AppDatabase {
         ]))
       .get();
 
+  Future<List<LitterBox>> allBoxesOnce() => (select(litterBoxes)
+        ..orderBy([
+          (t) => OrderingTerm.asc(t.position),
+          (t) => OrderingTerm.asc(t.id),
+        ]))
+      .get();
+
   Future<LitterBox?> boxById(int id) =>
       (select(litterBoxes)..where((t) => t.id.equals(id))).getSingleOrNull();
 
@@ -166,7 +190,8 @@ class AppDatabase extends _$AppDatabase {
   Future<int> insertBox(LitterBoxesCompanion box) =>
       into(litterBoxes).insert(box);
 
-  Future<void> updateBox(LitterBox box) => update(litterBoxes).replace(box);
+  Future<void> updateBox(LitterBox box) =>
+      update(litterBoxes).replace(box.copyWith(updatedAt: _nowMs()));
 
   Future<void> deleteBox(LitterBox box) =>
       (delete(litterBoxes)..where((t) => t.id.equals(box.id))).go();
@@ -191,6 +216,11 @@ class AppDatabase extends _$AppDatabase {
         ..limit(1))
       .getSingleOrNull();
 
+  Future<List<CleaningEvent>> allEventsOnce() =>
+      (select(cleaningEvents)
+            ..orderBy([(t) => OrderingTerm.desc(t.timestamp)]))
+          .get();
+
   Stream<int> observeCountSince(int boxId, int since) {
     final q = selectOnly(cleaningEvents)
       ..addColumns([cleaningEvents.id.count()])
@@ -214,7 +244,7 @@ class AppDatabase extends _$AppDatabase {
       into(cleaningEvents).insert(event);
 
   Future<void> updateEvent(CleaningEvent event) =>
-      update(cleaningEvents).replace(event);
+      update(cleaningEvents).replace(event.copyWith(updatedAt: _nowMs()));
 
   Future<CleaningEvent?> eventById(int id) =>
       (select(cleaningEvents)..where((t) => t.id.equals(id)))
@@ -227,9 +257,14 @@ class AppDatabase extends _$AppDatabase {
       (delete(cleaningEvents)..where((t) => t.id.isIn(ids))).go();
 
   Future<void> shiftTimestamps(int boxId, int deltaMs) async {
+    final now = _nowMs();
     await customUpdate(
-      'UPDATE cleaning_events SET timestamp = timestamp + ?1 WHERE box_id = ?2',
-      variables: [Variable.withInt(deltaMs), Variable.withInt(boxId)],
+      'UPDATE cleaning_events SET timestamp = timestamp + ?1, updated_at = ?3 WHERE box_id = ?2',
+      variables: [
+        Variable.withInt(deltaMs),
+        Variable.withInt(boxId),
+        Variable.withInt(now),
+      ],
       updates: {cleaningEvents},
     );
   }
@@ -247,6 +282,11 @@ class AppDatabase extends _$AppDatabase {
             ..orderBy([(t) => OrderingTerm.asc(t.id)]))
           .get();
 
+  Future<List<MaintenanceTask>> allTasksOnce() =>
+      (select(maintenanceTasks)
+            ..orderBy([(t) => OrderingTerm.asc(t.id)]))
+          .get();
+
   Future<MaintenanceTask?> taskById(int id) =>
       (select(maintenanceTasks)..where((t) => t.id.equals(id)))
           .getSingleOrNull();
@@ -255,8 +295,36 @@ class AppDatabase extends _$AppDatabase {
       into(maintenanceTasks).insert(task);
 
   Future<void> updateTask(MaintenanceTask task) =>
-      update(maintenanceTasks).replace(task);
+      update(maintenanceTasks).replace(task.copyWith(updatedAt: _nowMs()));
 
   Future<void> deleteTask(MaintenanceTask task) =>
       (delete(maintenanceTasks)..where((t) => t.id.equals(task.id))).go();
+
+  // --- Sync-write methods: preserve the caller's updatedAt, do not stamp now.
+  // These are used by the network sync layer where the timestamp must reflect
+  // the originating device's clock, not the receiving device's.
+
+  Future<void> syncUpsertRoom(RoomsCompanion c) =>
+      into(rooms).insertOnConflictUpdate(c);
+
+  Future<void> syncUpsertBox(LitterBoxesCompanion c) =>
+      into(litterBoxes).insertOnConflictUpdate(c);
+
+  Future<void> syncUpsertEvent(CleaningEventsCompanion c) =>
+      into(cleaningEvents).insertOnConflictUpdate(c);
+
+  Future<void> syncUpsertTask(MaintenanceTasksCompanion c) =>
+      into(maintenanceTasks).insertOnConflictUpdate(c);
+
+  Future<void> syncDeleteRoom(int id) =>
+      (delete(rooms)..where((t) => t.id.equals(id))).go();
+
+  Future<void> syncDeleteBox(int id) =>
+      (delete(litterBoxes)..where((t) => t.id.equals(id))).go();
+
+  Future<void> syncDeleteEvent(int id) =>
+      (delete(cleaningEvents)..where((t) => t.id.equals(id))).go();
+
+  Future<void> syncDeleteTask(int id) =>
+      (delete(maintenanceTasks)..where((t) => t.id.equals(id))).go();
 }

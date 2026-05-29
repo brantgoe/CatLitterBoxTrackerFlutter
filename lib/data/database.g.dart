@@ -30,8 +30,20 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
   @override
-  List<GeneratedColumn> get $columns => [id, name];
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    clientDefault: _nowMs,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, name, updatedAt];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -55,6 +67,12 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
     } else if (isInserting) {
       context.missing(_nameMeta);
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -72,6 +90,10 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
         DriftSqlType.string,
         data['${effectivePrefix}name'],
       )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
@@ -84,17 +106,27 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, BoxRoom> {
 class BoxRoom extends DataClass implements Insertable<BoxRoom> {
   final int id;
   final String name;
-  const BoxRoom({required this.id, required this.name});
+  final int updatedAt;
+  const BoxRoom({
+    required this.id,
+    required this.name,
+    required this.updatedAt,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
     map['name'] = Variable<String>(name);
+    map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
 
   RoomsCompanion toCompanion(bool nullToAbsent) {
-    return RoomsCompanion(id: Value(id), name: Value(name));
+    return RoomsCompanion(
+      id: Value(id),
+      name: Value(name),
+      updatedAt: Value(updatedAt),
+    );
   }
 
   factory BoxRoom.fromJson(
@@ -105,6 +137,7 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
     return BoxRoom(
       id: serializer.fromJson<int>(json['id']),
       name: serializer.fromJson<String>(json['name']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
   @override
@@ -113,15 +146,20 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
       'name': serializer.toJson<String>(name),
+      'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
 
-  BoxRoom copyWith({int? id, String? name}) =>
-      BoxRoom(id: id ?? this.id, name: name ?? this.name);
+  BoxRoom copyWith({int? id, String? name, int? updatedAt}) => BoxRoom(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
   BoxRoom copyWithCompanion(RoomsCompanion data) {
     return BoxRoom(
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -129,40 +167,59 @@ class BoxRoom extends DataClass implements Insertable<BoxRoom> {
   String toString() {
     return (StringBuffer('BoxRoom(')
           ..write('id: $id, ')
-          ..write('name: $name')
+          ..write('name: $name, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name);
+  int get hashCode => Object.hash(id, name, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is BoxRoom && other.id == this.id && other.name == this.name);
+      (other is BoxRoom &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.updatedAt == this.updatedAt);
 }
 
 class RoomsCompanion extends UpdateCompanion<BoxRoom> {
   final Value<int> id;
   final Value<String> name;
+  final Value<int> updatedAt;
   const RoomsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   });
-  RoomsCompanion.insert({this.id = const Value.absent(), required String name})
-    : name = Value(name);
+  RoomsCompanion.insert({
+    this.id = const Value.absent(),
+    required String name,
+    this.updatedAt = const Value.absent(),
+  }) : name = Value(name);
   static Insertable<BoxRoom> custom({
     Expression<int>? id,
     Expression<String>? name,
+    Expression<int>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (name != null) 'name': name,
+      if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
 
-  RoomsCompanion copyWith({Value<int>? id, Value<String>? name}) {
-    return RoomsCompanion(id: id ?? this.id, name: name ?? this.name);
+  RoomsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? name,
+    Value<int>? updatedAt,
+  }) {
+    return RoomsCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
   }
 
   @override
@@ -174,6 +231,9 @@ class RoomsCompanion extends UpdateCompanion<BoxRoom> {
     if (name.present) {
       map['name'] = Variable<String>(name.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
     return map;
   }
 
@@ -181,7 +241,8 @@ class RoomsCompanion extends UpdateCompanion<BoxRoom> {
   String toString() {
     return (StringBuffer('RoomsCompanion(')
           ..write('id: $id, ')
-          ..write('name: $name')
+          ..write('name: $name, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -291,6 +352,18 @@ class $LitterBoxesTable extends LitterBoxes
       'REFERENCES rooms (id) ON DELETE SET NULL',
     ),
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    clientDefault: _nowMs,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -302,6 +375,7 @@ class $LitterBoxesTable extends LitterBoxes
     brand,
     model,
     roomId,
+    updatedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -374,6 +448,12 @@ class $LitterBoxesTable extends LitterBoxes
         roomId.isAcceptableOrUnknown(data['room_id']!, _roomIdMeta),
       );
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -419,6 +499,10 @@ class $LitterBoxesTable extends LitterBoxes
         DriftSqlType.int,
         data['${effectivePrefix}room_id'],
       ),
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
@@ -438,6 +522,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
   final String brand;
   final String model;
   final int? roomId;
+  final int updatedAt;
   const LitterBox({
     required this.id,
     required this.name,
@@ -448,6 +533,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
     required this.brand,
     required this.model,
     this.roomId,
+    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -463,6 +549,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
     if (!nullToAbsent || roomId != null) {
       map['room_id'] = Variable<int>(roomId);
     }
+    map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
 
@@ -479,6 +566,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
       roomId: roomId == null && nullToAbsent
           ? const Value.absent()
           : Value(roomId),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -499,6 +587,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
       brand: serializer.fromJson<String>(json['brand']),
       model: serializer.fromJson<String>(json['model']),
       roomId: serializer.fromJson<int?>(json['roomId']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
   @override
@@ -514,6 +603,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
       'brand': serializer.toJson<String>(brand),
       'model': serializer.toJson<String>(model),
       'roomId': serializer.toJson<int?>(roomId),
+      'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
 
@@ -527,6 +617,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
     String? brand,
     String? model,
     Value<int?> roomId = const Value.absent(),
+    int? updatedAt,
   }) => LitterBox(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -537,6 +628,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
     brand: brand ?? this.brand,
     model: model ?? this.model,
     roomId: roomId.present ? roomId.value : this.roomId,
+    updatedAt: updatedAt ?? this.updatedAt,
   );
   LitterBox copyWithCompanion(LitterBoxesCompanion data) {
     return LitterBox(
@@ -553,6 +645,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
       brand: data.brand.present ? data.brand.value : this.brand,
       model: data.model.present ? data.model.value : this.model,
       roomId: data.roomId.present ? data.roomId.value : this.roomId,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -567,7 +660,8 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
           ..write('overdueThresholdHours: $overdueThresholdHours, ')
           ..write('brand: $brand, ')
           ..write('model: $model, ')
-          ..write('roomId: $roomId')
+          ..write('roomId: $roomId, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -583,6 +677,7 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
     brand,
     model,
     roomId,
+    updatedAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -596,7 +691,8 @@ class LitterBox extends DataClass implements Insertable<LitterBox> {
           other.overdueThresholdHours == this.overdueThresholdHours &&
           other.brand == this.brand &&
           other.model == this.model &&
-          other.roomId == this.roomId);
+          other.roomId == this.roomId &&
+          other.updatedAt == this.updatedAt);
 }
 
 class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
@@ -609,6 +705,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
   final Value<String> brand;
   final Value<String> model;
   final Value<int?> roomId;
+  final Value<int> updatedAt;
   const LitterBoxesCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
@@ -619,6 +716,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
     this.brand = const Value.absent(),
     this.model = const Value.absent(),
     this.roomId = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   });
   LitterBoxesCompanion.insert({
     this.id = const Value.absent(),
@@ -630,6 +728,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
     this.brand = const Value.absent(),
     this.model = const Value.absent(),
     this.roomId = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   }) : name = Value(name);
   static Insertable<LitterBox> custom({
     Expression<int>? id,
@@ -641,6 +740,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
     Expression<String>? brand,
     Expression<String>? model,
     Expression<int>? roomId,
+    Expression<int>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -654,6 +754,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
       if (brand != null) 'brand': brand,
       if (model != null) 'model': model,
       if (roomId != null) 'room_id': roomId,
+      if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
 
@@ -667,6 +768,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
     Value<String>? brand,
     Value<String>? model,
     Value<int?>? roomId,
+    Value<int>? updatedAt,
   }) {
     return LitterBoxesCompanion(
       id: id ?? this.id,
@@ -679,6 +781,7 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
       brand: brand ?? this.brand,
       model: model ?? this.model,
       roomId: roomId ?? this.roomId,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -714,6 +817,9 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
     if (roomId.present) {
       map['room_id'] = Variable<int>(roomId.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
     return map;
   }
 
@@ -728,7 +834,8 @@ class LitterBoxesCompanion extends UpdateCompanion<LitterBox> {
           ..write('overdueThresholdHours: $overdueThresholdHours, ')
           ..write('brand: $brand, ')
           ..write('model: $model, ')
-          ..write('roomId: $roomId')
+          ..write('roomId: $roomId, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -790,8 +897,26 @@ class $CleaningEventsTable extends CleaningEvents
       'CHECK ("due_to_smell" IN (0, 1))',
     ),
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
   @override
-  List<GeneratedColumn> get $columns => [id, boxId, timestamp, dueToSmell];
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    clientDefault: _nowMs,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    boxId,
+    timestamp,
+    dueToSmell,
+    updatedAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -832,6 +957,12 @@ class $CleaningEventsTable extends CleaningEvents
         ),
       );
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -857,6 +988,10 @@ class $CleaningEventsTable extends CleaningEvents
         DriftSqlType.bool,
         data['${effectivePrefix}due_to_smell'],
       ),
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
@@ -871,11 +1006,13 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
   final int boxId;
   final int timestamp;
   final bool? dueToSmell;
+  final int updatedAt;
   const CleaningEvent({
     required this.id,
     required this.boxId,
     required this.timestamp,
     this.dueToSmell,
+    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -886,6 +1023,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
     if (!nullToAbsent || dueToSmell != null) {
       map['due_to_smell'] = Variable<bool>(dueToSmell);
     }
+    map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
 
@@ -897,6 +1035,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
       dueToSmell: dueToSmell == null && nullToAbsent
           ? const Value.absent()
           : Value(dueToSmell),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -910,6 +1049,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
       boxId: serializer.fromJson<int>(json['boxId']),
       timestamp: serializer.fromJson<int>(json['timestamp']),
       dueToSmell: serializer.fromJson<bool?>(json['dueToSmell']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
   @override
@@ -920,6 +1060,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
       'boxId': serializer.toJson<int>(boxId),
       'timestamp': serializer.toJson<int>(timestamp),
       'dueToSmell': serializer.toJson<bool?>(dueToSmell),
+      'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
 
@@ -928,11 +1069,13 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
     int? boxId,
     int? timestamp,
     Value<bool?> dueToSmell = const Value.absent(),
+    int? updatedAt,
   }) => CleaningEvent(
     id: id ?? this.id,
     boxId: boxId ?? this.boxId,
     timestamp: timestamp ?? this.timestamp,
     dueToSmell: dueToSmell.present ? dueToSmell.value : this.dueToSmell,
+    updatedAt: updatedAt ?? this.updatedAt,
   );
   CleaningEvent copyWithCompanion(CleaningEventsCompanion data) {
     return CleaningEvent(
@@ -942,6 +1085,7 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
       dueToSmell: data.dueToSmell.present
           ? data.dueToSmell.value
           : this.dueToSmell,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -951,13 +1095,14 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
           ..write('id: $id, ')
           ..write('boxId: $boxId, ')
           ..write('timestamp: $timestamp, ')
-          ..write('dueToSmell: $dueToSmell')
+          ..write('dueToSmell: $dueToSmell, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, boxId, timestamp, dueToSmell);
+  int get hashCode => Object.hash(id, boxId, timestamp, dueToSmell, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -965,7 +1110,8 @@ class CleaningEvent extends DataClass implements Insertable<CleaningEvent> {
           other.id == this.id &&
           other.boxId == this.boxId &&
           other.timestamp == this.timestamp &&
-          other.dueToSmell == this.dueToSmell);
+          other.dueToSmell == this.dueToSmell &&
+          other.updatedAt == this.updatedAt);
 }
 
 class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
@@ -973,17 +1119,20 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
   final Value<int> boxId;
   final Value<int> timestamp;
   final Value<bool?> dueToSmell;
+  final Value<int> updatedAt;
   const CleaningEventsCompanion({
     this.id = const Value.absent(),
     this.boxId = const Value.absent(),
     this.timestamp = const Value.absent(),
     this.dueToSmell = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   });
   CleaningEventsCompanion.insert({
     this.id = const Value.absent(),
     required int boxId,
     required int timestamp,
     this.dueToSmell = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   }) : boxId = Value(boxId),
        timestamp = Value(timestamp);
   static Insertable<CleaningEvent> custom({
@@ -991,12 +1140,14 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
     Expression<int>? boxId,
     Expression<int>? timestamp,
     Expression<bool>? dueToSmell,
+    Expression<int>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (boxId != null) 'box_id': boxId,
       if (timestamp != null) 'timestamp': timestamp,
       if (dueToSmell != null) 'due_to_smell': dueToSmell,
+      if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
 
@@ -1005,12 +1156,14 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
     Value<int>? boxId,
     Value<int>? timestamp,
     Value<bool?>? dueToSmell,
+    Value<int>? updatedAt,
   }) {
     return CleaningEventsCompanion(
       id: id ?? this.id,
       boxId: boxId ?? this.boxId,
       timestamp: timestamp ?? this.timestamp,
       dueToSmell: dueToSmell ?? this.dueToSmell,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -1029,6 +1182,9 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
     if (dueToSmell.present) {
       map['due_to_smell'] = Variable<bool>(dueToSmell.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
     return map;
   }
 
@@ -1038,7 +1194,8 @@ class CleaningEventsCompanion extends UpdateCompanion<CleaningEvent> {
           ..write('id: $id, ')
           ..write('boxId: $boxId, ')
           ..write('timestamp: $timestamp, ')
-          ..write('dueToSmell: $dueToSmell')
+          ..write('dueToSmell: $dueToSmell, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -1133,6 +1290,18 @@ class $MaintenanceTasksTable extends MaintenanceTasks
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    clientDefault: _nowMs,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1142,6 +1311,7 @@ class $MaintenanceTasksTable extends MaintenanceTasks
     anchorTimestamp,
     enabled,
     offsetCleanings,
+    updatedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1211,6 +1381,12 @@ class $MaintenanceTasksTable extends MaintenanceTasks
         ),
       );
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -1248,6 +1424,10 @@ class $MaintenanceTasksTable extends MaintenanceTasks
         DriftSqlType.int,
         data['${effectivePrefix}offset_cleanings'],
       )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
@@ -1265,6 +1445,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
   final int anchorTimestamp;
   final bool enabled;
   final int offsetCleanings;
+  final int updatedAt;
   const MaintenanceTask({
     required this.id,
     required this.boxId,
@@ -1273,6 +1454,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
     required this.anchorTimestamp,
     required this.enabled,
     required this.offsetCleanings,
+    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1284,6 +1466,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
     map['anchor_timestamp'] = Variable<int>(anchorTimestamp);
     map['enabled'] = Variable<bool>(enabled);
     map['offset_cleanings'] = Variable<int>(offsetCleanings);
+    map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
 
@@ -1296,6 +1479,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
       anchorTimestamp: Value(anchorTimestamp),
       enabled: Value(enabled),
       offsetCleanings: Value(offsetCleanings),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -1312,6 +1496,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
       anchorTimestamp: serializer.fromJson<int>(json['anchorTimestamp']),
       enabled: serializer.fromJson<bool>(json['enabled']),
       offsetCleanings: serializer.fromJson<int>(json['offsetCleanings']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
   @override
@@ -1325,6 +1510,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
       'anchorTimestamp': serializer.toJson<int>(anchorTimestamp),
       'enabled': serializer.toJson<bool>(enabled),
       'offsetCleanings': serializer.toJson<int>(offsetCleanings),
+      'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
 
@@ -1336,6 +1522,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
     int? anchorTimestamp,
     bool? enabled,
     int? offsetCleanings,
+    int? updatedAt,
   }) => MaintenanceTask(
     id: id ?? this.id,
     boxId: boxId ?? this.boxId,
@@ -1344,6 +1531,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
     anchorTimestamp: anchorTimestamp ?? this.anchorTimestamp,
     enabled: enabled ?? this.enabled,
     offsetCleanings: offsetCleanings ?? this.offsetCleanings,
+    updatedAt: updatedAt ?? this.updatedAt,
   );
   MaintenanceTask copyWithCompanion(MaintenanceTasksCompanion data) {
     return MaintenanceTask(
@@ -1360,6 +1548,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
       offsetCleanings: data.offsetCleanings.present
           ? data.offsetCleanings.value
           : this.offsetCleanings,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -1372,7 +1561,8 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
           ..write('intervalCleanings: $intervalCleanings, ')
           ..write('anchorTimestamp: $anchorTimestamp, ')
           ..write('enabled: $enabled, ')
-          ..write('offsetCleanings: $offsetCleanings')
+          ..write('offsetCleanings: $offsetCleanings, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -1386,6 +1576,7 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
     anchorTimestamp,
     enabled,
     offsetCleanings,
+    updatedAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -1397,7 +1588,8 @@ class MaintenanceTask extends DataClass implements Insertable<MaintenanceTask> {
           other.intervalCleanings == this.intervalCleanings &&
           other.anchorTimestamp == this.anchorTimestamp &&
           other.enabled == this.enabled &&
-          other.offsetCleanings == this.offsetCleanings);
+          other.offsetCleanings == this.offsetCleanings &&
+          other.updatedAt == this.updatedAt);
 }
 
 class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
@@ -1408,6 +1600,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
   final Value<int> anchorTimestamp;
   final Value<bool> enabled;
   final Value<int> offsetCleanings;
+  final Value<int> updatedAt;
   const MaintenanceTasksCompanion({
     this.id = const Value.absent(),
     this.boxId = const Value.absent(),
@@ -1416,6 +1609,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
     this.anchorTimestamp = const Value.absent(),
     this.enabled = const Value.absent(),
     this.offsetCleanings = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   });
   MaintenanceTasksCompanion.insert({
     this.id = const Value.absent(),
@@ -1425,6 +1619,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
     required int anchorTimestamp,
     this.enabled = const Value.absent(),
     this.offsetCleanings = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   }) : boxId = Value(boxId),
        name = Value(name),
        intervalCleanings = Value(intervalCleanings),
@@ -1437,6 +1632,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
     Expression<int>? anchorTimestamp,
     Expression<bool>? enabled,
     Expression<int>? offsetCleanings,
+    Expression<int>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -1446,6 +1642,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
       if (anchorTimestamp != null) 'anchor_timestamp': anchorTimestamp,
       if (enabled != null) 'enabled': enabled,
       if (offsetCleanings != null) 'offset_cleanings': offsetCleanings,
+      if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
 
@@ -1457,6 +1654,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
     Value<int>? anchorTimestamp,
     Value<bool>? enabled,
     Value<int>? offsetCleanings,
+    Value<int>? updatedAt,
   }) {
     return MaintenanceTasksCompanion(
       id: id ?? this.id,
@@ -1466,6 +1664,7 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
       anchorTimestamp: anchorTimestamp ?? this.anchorTimestamp,
       enabled: enabled ?? this.enabled,
       offsetCleanings: offsetCleanings ?? this.offsetCleanings,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -1493,6 +1692,9 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
     if (offsetCleanings.present) {
       map['offset_cleanings'] = Variable<int>(offsetCleanings.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
     return map;
   }
 
@@ -1505,7 +1707,8 @@ class MaintenanceTasksCompanion extends UpdateCompanion<MaintenanceTask> {
           ..write('intervalCleanings: $intervalCleanings, ')
           ..write('anchorTimestamp: $anchorTimestamp, ')
           ..write('enabled: $enabled, ')
-          ..write('offsetCleanings: $offsetCleanings')
+          ..write('offsetCleanings: $offsetCleanings, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -1557,9 +1760,17 @@ abstract class _$AppDatabase extends GeneratedDatabase {
 }
 
 typedef $$RoomsTableCreateCompanionBuilder =
-    RoomsCompanion Function({Value<int> id, required String name});
+    RoomsCompanion Function({
+      Value<int> id,
+      required String name,
+      Value<int> updatedAt,
+    });
 typedef $$RoomsTableUpdateCompanionBuilder =
-    RoomsCompanion Function({Value<int> id, Value<String> name});
+    RoomsCompanion Function({
+      Value<int> id,
+      Value<String> name,
+      Value<int> updatedAt,
+    });
 
 final class $$RoomsTableReferences
     extends BaseReferences<_$AppDatabase, $RoomsTable, BoxRoom> {
@@ -1599,6 +1810,11 @@ class $$RoomsTableFilterComposer extends Composer<_$AppDatabase, $RoomsTable> {
 
   ColumnFilters<String> get name => $composableBuilder(
     column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1646,6 +1862,11 @@ class $$RoomsTableOrderingComposer
     column: $table.name,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$RoomsTableAnnotationComposer
@@ -1662,6 +1883,9 @@ class $$RoomsTableAnnotationComposer
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   Expression<T> litterBoxesRefs<T extends Object>(
     Expression<T> Function($$LitterBoxesTableAnnotationComposer a) f,
@@ -1719,10 +1943,18 @@ class $$RoomsTableTableManager
               ({
                 Value<int> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
-              }) => RoomsCompanion(id: id, name: name),
+                Value<int> updatedAt = const Value.absent(),
+              }) => RoomsCompanion(id: id, name: name, updatedAt: updatedAt),
           createCompanionCallback:
-              ({Value<int> id = const Value.absent(), required String name}) =>
-                  RoomsCompanion.insert(id: id, name: name),
+              ({
+                Value<int> id = const Value.absent(),
+                required String name,
+                Value<int> updatedAt = const Value.absent(),
+              }) => RoomsCompanion.insert(
+                id: id,
+                name: name,
+                updatedAt: updatedAt,
+              ),
           withReferenceMapper: (p0) => p0
               .map(
                 (e) =>
@@ -1780,6 +2012,7 @@ typedef $$LitterBoxesTableCreateCompanionBuilder =
       Value<String> brand,
       Value<String> model,
       Value<int?> roomId,
+      Value<int> updatedAt,
     });
 typedef $$LitterBoxesTableUpdateCompanionBuilder =
     LitterBoxesCompanion Function({
@@ -1792,6 +2025,7 @@ typedef $$LitterBoxesTableUpdateCompanionBuilder =
       Value<String> brand,
       Value<String> model,
       Value<int?> roomId,
+      Value<int> updatedAt,
     });
 
 final class $$LitterBoxesTableReferences
@@ -1904,6 +2138,11 @@ class $$LitterBoxesTableFilterComposer
 
   ColumnFilters<String> get model => $composableBuilder(
     column: $table.model,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2030,6 +2269,11 @@ class $$LitterBoxesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$RoomsTableOrderingComposer get roomId {
     final $$RoomsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -2090,6 +2334,9 @@ class $$LitterBoxesTableAnnotationComposer
 
   GeneratedColumn<String> get model =>
       $composableBuilder(column: $table.model, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   $$RoomsTableAnnotationComposer get roomId {
     final $$RoomsTableAnnotationComposer composer = $composerBuilder(
@@ -2206,6 +2453,7 @@ class $$LitterBoxesTableTableManager
                 Value<String> brand = const Value.absent(),
                 Value<String> model = const Value.absent(),
                 Value<int?> roomId = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
               }) => LitterBoxesCompanion(
                 id: id,
                 name: name,
@@ -2216,6 +2464,7 @@ class $$LitterBoxesTableTableManager
                 brand: brand,
                 model: model,
                 roomId: roomId,
+                updatedAt: updatedAt,
               ),
           createCompanionCallback:
               ({
@@ -2228,6 +2477,7 @@ class $$LitterBoxesTableTableManager
                 Value<String> brand = const Value.absent(),
                 Value<String> model = const Value.absent(),
                 Value<int?> roomId = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
               }) => LitterBoxesCompanion.insert(
                 id: id,
                 name: name,
@@ -2238,6 +2488,7 @@ class $$LitterBoxesTableTableManager
                 brand: brand,
                 model: model,
                 roomId: roomId,
+                updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(
@@ -2369,6 +2620,7 @@ typedef $$CleaningEventsTableCreateCompanionBuilder =
       required int boxId,
       required int timestamp,
       Value<bool?> dueToSmell,
+      Value<int> updatedAt,
     });
 typedef $$CleaningEventsTableUpdateCompanionBuilder =
     CleaningEventsCompanion Function({
@@ -2376,6 +2628,7 @@ typedef $$CleaningEventsTableUpdateCompanionBuilder =
       Value<int> boxId,
       Value<int> timestamp,
       Value<bool?> dueToSmell,
+      Value<int> updatedAt,
     });
 
 final class $$CleaningEventsTableReferences
@@ -2430,6 +2683,11 @@ class $$CleaningEventsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   $$LitterBoxesTableFilterComposer get boxId {
     final $$LitterBoxesTableFilterComposer composer = $composerBuilder(
       composer: this,
@@ -2478,6 +2736,11 @@ class $$CleaningEventsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$LitterBoxesTableOrderingComposer get boxId {
     final $$LitterBoxesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -2521,6 +2784,9 @@ class $$CleaningEventsTableAnnotationComposer
     column: $table.dueToSmell,
     builder: (column) => column,
   );
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   $$LitterBoxesTableAnnotationComposer get boxId {
     final $$LitterBoxesTableAnnotationComposer composer = $composerBuilder(
@@ -2580,11 +2846,13 @@ class $$CleaningEventsTableTableManager
                 Value<int> boxId = const Value.absent(),
                 Value<int> timestamp = const Value.absent(),
                 Value<bool?> dueToSmell = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
               }) => CleaningEventsCompanion(
                 id: id,
                 boxId: boxId,
                 timestamp: timestamp,
                 dueToSmell: dueToSmell,
+                updatedAt: updatedAt,
               ),
           createCompanionCallback:
               ({
@@ -2592,11 +2860,13 @@ class $$CleaningEventsTableTableManager
                 required int boxId,
                 required int timestamp,
                 Value<bool?> dueToSmell = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
               }) => CleaningEventsCompanion.insert(
                 id: id,
                 boxId: boxId,
                 timestamp: timestamp,
                 dueToSmell: dueToSmell,
+                updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(
@@ -2675,6 +2945,7 @@ typedef $$MaintenanceTasksTableCreateCompanionBuilder =
       required int anchorTimestamp,
       Value<bool> enabled,
       Value<int> offsetCleanings,
+      Value<int> updatedAt,
     });
 typedef $$MaintenanceTasksTableUpdateCompanionBuilder =
     MaintenanceTasksCompanion Function({
@@ -2685,6 +2956,7 @@ typedef $$MaintenanceTasksTableUpdateCompanionBuilder =
       Value<int> anchorTimestamp,
       Value<bool> enabled,
       Value<int> offsetCleanings,
+      Value<int> updatedAt,
     });
 
 final class $$MaintenanceTasksTableReferences
@@ -2755,6 +3027,11 @@ class $$MaintenanceTasksTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   $$LitterBoxesTableFilterComposer get boxId {
     final $$LitterBoxesTableFilterComposer composer = $composerBuilder(
       composer: this,
@@ -2818,6 +3095,11 @@ class $$MaintenanceTasksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$LitterBoxesTableOrderingComposer get boxId {
     final $$LitterBoxesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -2874,6 +3156,9 @@ class $$MaintenanceTasksTableAnnotationComposer
     column: $table.offsetCleanings,
     builder: (column) => column,
   );
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   $$LitterBoxesTableAnnotationComposer get boxId {
     final $$LitterBoxesTableAnnotationComposer composer = $composerBuilder(
@@ -2936,6 +3221,7 @@ class $$MaintenanceTasksTableTableManager
                 Value<int> anchorTimestamp = const Value.absent(),
                 Value<bool> enabled = const Value.absent(),
                 Value<int> offsetCleanings = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
               }) => MaintenanceTasksCompanion(
                 id: id,
                 boxId: boxId,
@@ -2944,6 +3230,7 @@ class $$MaintenanceTasksTableTableManager
                 anchorTimestamp: anchorTimestamp,
                 enabled: enabled,
                 offsetCleanings: offsetCleanings,
+                updatedAt: updatedAt,
               ),
           createCompanionCallback:
               ({
@@ -2954,6 +3241,7 @@ class $$MaintenanceTasksTableTableManager
                 required int anchorTimestamp,
                 Value<bool> enabled = const Value.absent(),
                 Value<int> offsetCleanings = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
               }) => MaintenanceTasksCompanion.insert(
                 id: id,
                 boxId: boxId,
@@ -2962,6 +3250,7 @@ class $$MaintenanceTasksTableTableManager
                 anchorTimestamp: anchorTimestamp,
                 enabled: enabled,
                 offsetCleanings: offsetCleanings,
+                updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(

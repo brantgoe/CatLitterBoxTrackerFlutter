@@ -3,9 +3,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
+import '../network/network_preferences.dart';
+import '../network/sync_client.dart';
+import '../network/sync_engine.dart';
 import '../state/providers.dart';
 import 'box_card.dart';
 import 'dev_menu_screen.dart';
+import 'network_settings_screen.dart';
 import 'setup_screen.dart';
 import 'theme.dart';
 
@@ -43,6 +47,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
           ),
         ),
         actions: [
+          _networkBadge(),
           IconButton(
             icon: const Icon(Icons.build_outlined),
             onPressed: () {
@@ -565,6 +570,50 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     );
     if (confirm == true) {
       await ref.read(repositoryProvider).deleteRoom(picked);
+    }
+  }
+
+  Widget _networkBadge() {
+    final status = ref.watch(syncStatusProvider);
+    final (color, tooltip) = _badgeColor(status);
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        icon: Icon(_badgeIcon(status), color: color),
+        onPressed: () {
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => const NetworkSettingsScreen(),
+          ));
+        },
+      ),
+    );
+  }
+
+  IconData _badgeIcon(SyncEngineStatus s) {
+    if (s.role == DeviceRole.master) return Icons.dns_outlined;
+    if (s.role == DeviceRole.client) return Icons.cloud_outlined;
+    return Icons.cloud_off_outlined;
+  }
+
+  (Color, String) _badgeColor(SyncEngineStatus s) {
+    switch (s.status) {
+      case SyncStatus.off:
+        return (AppColors.textSecondary, 'Networking off');
+      case SyncStatus.starting:
+        return (AppColors.statusWarn, 'Connecting…');
+      case SyncStatus.running:
+        if (s.role == DeviceRole.master) {
+          return (
+            AppColors.statusOk,
+            'Master • ${s.connectedClientCount ?? 0} client(s)'
+          );
+        }
+        if (s.clientState == ClientState.connected) {
+          return (AppColors.statusOk, 'Client • connected');
+        }
+        return (AppColors.statusWarn, 'Client • connecting');
+      case SyncStatus.error:
+        return (AppColors.statusOverdue, s.detail ?? 'Error');
     }
   }
 }

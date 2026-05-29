@@ -3,6 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'data/database.dart';
+import 'data/repository.dart';
+import 'network/network_preferences.dart';
+import 'network/sync_engine.dart';
 import 'state/providers.dart';
 import 'ui/main_screen.dart';
 import 'ui/theme.dart';
@@ -16,9 +20,19 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
   final prefs = await SharedPreferences.getInstance();
+  final db = AppDatabase();
+  final repository = Repository(db, prefs);
+  final networkPrefs = NetworkPreferences(prefs);
+  final engine = SyncEngine(db: db, repository: repository, prefs: networkPrefs);
+  await engine.start();
+
   runApp(ProviderScope(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(prefs),
+      databaseProvider.overrideWithValue(db),
+      repositoryProvider.overrideWithValue(repository),
+      networkPreferencesProvider.overrideWithValue(networkPrefs),
+      syncEngineProvider.overrideWithValue(engine),
     ],
     child: const CatLitterBoxApp(),
   ));

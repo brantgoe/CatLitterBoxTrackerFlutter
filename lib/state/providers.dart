@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/database.dart';
 import '../data/repository.dart';
+import '../network/network_preferences.dart';
+import '../network/sync_engine.dart';
 
 class MaintenanceItem {
   MaintenanceItem(this.task, this.cleaningsSinceAnchor);
@@ -127,3 +129,49 @@ final boxesInActiveRoomProvider = StreamProvider<List<LitterBox>>((ref) {
   if (room == null) return Stream.value(const []);
   return repo.observeBoxesInRoom(room.id);
 });
+
+/// Networking ----------------------------------------------------------------
+
+final networkPreferencesProvider = Provider<NetworkPreferences>((ref) {
+  return NetworkPreferences(ref.watch(sharedPreferencesProvider));
+});
+
+class NetworkConfigNotifier extends Notifier<NetworkConfig> {
+  @override
+  NetworkConfig build() {
+    final prefs = ref.watch(networkPreferencesProvider);
+    void listener() => state = prefs.value;
+    prefs.listenable.addListener(listener);
+    ref.onDispose(() => prefs.listenable.removeListener(listener));
+    return prefs.value;
+  }
+
+  Future<void> update(NetworkConfig config) async {
+    await ref.read(networkPreferencesProvider).update(config);
+  }
+}
+
+final networkConfigProvider =
+    NotifierProvider<NetworkConfigNotifier, NetworkConfig>(
+        NetworkConfigNotifier.new);
+
+/// The engine itself is held in a Provider whose lifecycle matches the app.
+/// Override this in main() with a real engine instance that has been started.
+final syncEngineProvider = Provider<SyncEngine>((ref) {
+  throw UnimplementedError('Override in main()');
+});
+
+class SyncStatusNotifier extends Notifier<SyncEngineStatus> {
+  @override
+  SyncEngineStatus build() {
+    final engine = ref.watch(syncEngineProvider);
+    void listener() => state = engine.status.value;
+    engine.status.addListener(listener);
+    ref.onDispose(() => engine.status.removeListener(listener));
+    return engine.status.value;
+  }
+}
+
+final syncStatusProvider =
+    NotifierProvider<SyncStatusNotifier, SyncEngineStatus>(
+        SyncStatusNotifier.new);
