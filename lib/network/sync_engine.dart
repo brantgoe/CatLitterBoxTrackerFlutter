@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../data/database.dart';
 import '../data/repository.dart';
 import 'network_preferences.dart';
+import 'sync_applier.dart';
 import 'sync_client.dart';
 import 'sync_server.dart';
 
@@ -61,6 +62,16 @@ class SyncEngine {
 
   SyncServer? _server;
   SyncClient? _client;
+
+  /// Last snapshot summary applied while in client mode. Null until a client
+  /// connection successfully receives a snapshot.
+  ValueListenable<SyncOverview?> get lastClientSnapshot =>
+      _lastSnapshotProxy;
+  final ValueNotifier<SyncOverview?> _lastSnapshotProxy =
+      ValueNotifier(null);
+
+  Future<SyncOverview> snapshotLocalOverview() =>
+      SyncApplier(db).localOverview();
 
   final ValueNotifier<SyncEngineStatus> status =
       ValueNotifier(const SyncEngineStatus(
@@ -164,6 +175,9 @@ class SyncEngine {
           detail: client.errorMessage.value,
         );
       });
+      client.lastSnapshot.addListener(() {
+        _lastSnapshotProxy.value = client.lastSnapshot.value;
+      });
       await client.start();
       _client = client;
       status.value = SyncEngineStatus(
@@ -186,5 +200,6 @@ class SyncEngine {
     _server = null;
     await _client?.stop();
     _client = null;
+    _lastSnapshotProxy.value = null;
   }
 }

@@ -1,12 +1,53 @@
 import '../data/database.dart';
 import 'sync_protocol.dart';
 
+/// A summary of what's currently in the local DB or in a pending snapshot.
+class SyncOverview {
+  const SyncOverview({
+    required this.rooms,
+    required this.boxes,
+    required this.events,
+    required this.tasks,
+  });
+
+  final int rooms;
+  final int boxes;
+  final int events;
+  final int tasks;
+
+  bool get hasAny => rooms + boxes + events + tasks > 0;
+
+  static const empty = SyncOverview(rooms: 0, boxes: 0, events: 0, tasks: 0);
+
+  static SyncOverview fromSnapshot(Map<String, dynamic> snapshot) =>
+      SyncOverview(
+        rooms: (snapshot['rooms'] as List).length,
+        boxes: (snapshot['boxes'] as List).length,
+        events: (snapshot['events'] as List).length,
+        tasks: (snapshot['tasks'] as List).length,
+      );
+}
+
 /// Applies inbound sync messages to a local database with
 /// last-write-wins on entity `updatedAt`.
 class SyncApplier {
   SyncApplier(this.db);
 
   final AppDatabase db;
+
+  /// Snapshot the current local DB counts without modifying anything.
+  Future<SyncOverview> localOverview() async {
+    final rooms = await db.allRoomsOnce();
+    final boxes = await db.allBoxesOnce();
+    final events = await db.allEventsOnce();
+    final tasks = await db.allTasksOnce();
+    return SyncOverview(
+      rooms: rooms.length,
+      boxes: boxes.length,
+      events: events.length,
+      tasks: tasks.length,
+    );
+  }
 
   /// Apply an upsert. Returns true if the local row changed.
   Future<bool> applyUpsert(EntityKind kind, Map<String, dynamic> data) async {

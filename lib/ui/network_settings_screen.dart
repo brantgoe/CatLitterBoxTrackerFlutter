@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 
 import '../network/network_preferences.dart';
+import '../network/sync_applier.dart';
 import '../network/sync_client.dart';
 import '../network/sync_engine.dart';
 import '../state/providers.dart';
@@ -20,6 +21,8 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
   late TextEditingController _hostCtrl;
   late TextEditingController _portCtrl;
   String? _wifiIp;
+  SyncOverview? _lastShownSnapshot;
+  VoidCallback? _snapshotListener;
 
   @override
   void initState() {
@@ -28,6 +31,28 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
     _hostCtrl = TextEditingController(text: cfg.masterHost);
     _portCtrl = TextEditingController(text: cfg.masterPort.toString());
     _loadWifiIp();
+    _attachSnapshotListener();
+  }
+
+  void _attachSnapshotListener() {
+    final engine = ref.read(syncEngineProvider);
+    _snapshotListener = () {
+      final s = engine.lastClientSnapshot.value;
+      if (s == null || identical(s, _lastShownSnapshot)) return;
+      _lastShownSnapshot = s;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Local data replaced with master snapshot: '
+            '${s.rooms} room(s), ${s.boxes} box(es), '
+            '${s.events} cleaning(s), ${s.tasks} task(s).',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    };
+    engine.lastClientSnapshot.addListener(_snapshotListener!);
   }
 
   Future<void> _loadWifiIp() async {
@@ -39,6 +64,12 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
 
   @override
   void dispose() {
+    if (_snapshotListener != null) {
+      ref
+          .read(syncEngineProvider)
+          .lastClientSnapshot
+          .removeListener(_snapshotListener!);
+    }
     _hostCtrl.dispose();
     _portCtrl.dispose();
     super.dispose();
@@ -232,15 +263,50 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
   Future<void> _changeRole(DeviceRole role) async {
     final cfg = ref.read(networkConfigProvider);
     if (role == DeviceRole.client) {
-      // Warn before wiping local data on first switch.
+      final overview =
+          await ref.read(syncEngineProvider).snapshotLocalOverview();
+      if (!mounted) return;
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Switch to client?'),
-          content: const Text(
-              'Client mode replaces this device\'s data with the master\'s '
-              'snapshot when it connects. Anything you have here that isn\'t on '
-              'the master will be lost.'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Once this device connects to a master, the master\'s data '
+                'will replace whatever is on this tablet.',
+              ),
+              const SizedBox(height: 12),
+              if (overview.hasAny) ...[
+                const Text(
+                  'This tablet currently holds:',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text('• ${overview.rooms} room(s)'),
+                Text('• ${overview.boxes} box(es)'),
+                Text('• ${overview.events} cleaning event(s)'),
+                Text('• ${overview.tasks} maintenance task(s)'),
+                const SizedBox(height: 8),
+                const Text(
+                  'All of it will be discarded if anything on the master '
+                  'differs. Make sure you have the right master IP first.',
+                  style: TextStyle(color: AppColors.statusWarn),
+                ),
+              ] else
+                const Text(
+                  'This tablet has no local data, so nothing will be lost.',
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+              const SizedBox(height: 8),
+              const Text(
+                'If the connection fails, no data is touched.',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
+            ],
+          ),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),

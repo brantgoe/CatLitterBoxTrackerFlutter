@@ -38,6 +38,10 @@ class SyncClient {
   final ValueNotifier<ClientState> state = ValueNotifier(ClientState.disconnected);
   final ValueNotifier<String?> errorMessage = ValueNotifier(null);
 
+  /// Fires with the snapshot summary every time the master replaces local state.
+  /// Consumers (e.g. UI) can subscribe to surface a "data replaced" toast.
+  final ValueNotifier<SyncOverview?> lastSnapshot = ValueNotifier(null);
+
   Future<void> start() async {
     _stopped = false;
     await _connect();
@@ -115,6 +119,7 @@ class SyncClient {
           break;
         case MsgType.snapshot:
           await _applier.applySnapshot(m);
+          lastSnapshot.value = SyncOverview.fromSnapshot(m);
           break;
         case MsgType.upsert:
           final kind = EntityKindCodec.parse(m['entity'] as String);
