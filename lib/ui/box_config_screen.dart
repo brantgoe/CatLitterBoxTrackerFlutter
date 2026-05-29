@@ -25,6 +25,7 @@ class _BoxConfigScreenState extends ConsumerState<BoxConfigScreen> {
   final _overdueCtrl = TextEditingController();
   BoxTypeKind _type = BoxTypeKind.manualScoop;
   BoxPreset _preset = BoxPresets.custom;
+  String _brand = BoxPresets.otherBrand;
   int? _selectedRoomId;
 
   @override
@@ -47,6 +48,7 @@ class _BoxConfigScreenState extends ConsumerState<BoxConfigScreen> {
     _overdueCtrl.text = _hoursToDays(box.overdueThresholdHours).toString();
     _type = box.typeKind;
     _preset = BoxPresets.match(box.brand, box.model);
+    _brand = box.brand.isEmpty ? BoxPresets.otherBrand : box.brand;
     _selectedRoomId = box.roomId;
     _hydrated = true;
   }
@@ -135,24 +137,34 @@ class _BoxConfigScreenState extends ConsumerState<BoxConfigScreen> {
               ),
               if (_type == BoxTypeKind.automatic) ...[
                 const SizedBox(height: 24),
-                const Text('Automatic box model'),
+                const Text('Brand'),
                 DropdownButton<String>(
-                  value: _preset.displayName,
+                  value: _brand,
                   isExpanded: true,
-                  items: BoxPresets.all
-                      .map((p) => DropdownMenuItem(
-                            value: p.displayName,
-                            child: Text(p.displayName),
-                          ))
+                  items: BoxPresets.brandsForUi
+                      .map((b) => DropdownMenuItem(value: b, child: Text(b)))
                       .toList(),
-                  onChanged: (v) {
-                    setState(() {
-                      _preset = BoxPresets.all.firstWhere(
-                          (p) => p.displayName == v,
-                          orElse: () => BoxPresets.custom);
-                    });
-                  },
+                  onChanged: (v) => _onBrandChanged(v),
                 ),
+                if (_brand != BoxPresets.otherBrand) ...[
+                  const SizedBox(height: 12),
+                  const Text('Model'),
+                  DropdownButton<String>(
+                    value: BoxPresets.modelsForBrand(_brand)
+                            .any((p) => p.model == _preset.model)
+                        ? _preset.model
+                        : null,
+                    isExpanded: true,
+                    hint: const Text('Select model'),
+                    items: BoxPresets.modelsForBrand(_brand)
+                        .map((p) => DropdownMenuItem(
+                              value: p.model,
+                              child: Text(p.model),
+                            ))
+                        .toList(),
+                    onChanged: (v) => _onModelChanged(v),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 OutlinedButton(
                   onPressed: _preset.maintenanceItems.isEmpty
@@ -182,6 +194,27 @@ class _BoxConfigScreenState extends ConsumerState<BoxConfigScreen> {
         );
       },
     );
+  }
+
+  void _onBrandChanged(String? brand) {
+    setState(() {
+      _brand = brand ?? BoxPresets.otherBrand;
+      if (_brand == BoxPresets.otherBrand) {
+        _preset = BoxPresets.custom;
+      } else if (_preset.brand != _brand) {
+        // Don't auto-pick a model — let the user choose explicitly. Until
+        // they do, treat this as "brand selected, no model yet" — _preset
+        // sits on custom so Load preset stays disabled.
+        _preset = BoxPresets.custom;
+      }
+    });
+  }
+
+  void _onModelChanged(String? model) {
+    if (model == null) return;
+    final found = BoxPresets.modelsForBrand(_brand)
+        .firstWhere((p) => p.model == model, orElse: () => BoxPresets.custom);
+    setState(() => _preset = found);
   }
 
   Future<void> _confirmLoadPreset(Repository repo) async {

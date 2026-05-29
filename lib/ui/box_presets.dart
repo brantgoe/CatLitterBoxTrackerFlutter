@@ -51,6 +51,11 @@ class BoxPresets {
     maintenanceItems: [],
   );
 
+  /// Sentinel value shown in the Brand dropdown for any box that doesn't
+  /// match a known preset. Selecting this puts the box into custom mode and
+  /// hides the Model dropdown.
+  static const otherBrand = 'Other / Custom';
+
   static const List<BoxPreset> all = [petPivotAs11, litterRobot3, custom];
 
   static BoxPreset match(String brand, String model) {
@@ -58,5 +63,23 @@ class BoxPresets {
       if (p.brand == brand && p.model == model) return p;
     }
     return custom;
+  }
+
+  /// Unique brand names that have at least one model preset, alphabetised,
+  /// with the [otherBrand] sentinel at the end.
+  static List<String> get brandsForUi {
+    final brands = all
+        .where((p) => p.brand.isNotEmpty)
+        .map((p) => p.brand)
+        .toSet()
+        .toList()
+      ..sort();
+    return [...brands, otherBrand];
+  }
+
+  /// All preset models under [brand]. Empty for the [otherBrand] sentinel.
+  static List<BoxPreset> modelsForBrand(String brand) {
+    if (brand == otherBrand) return const [];
+    return all.where((p) => p.brand == brand).toList();
   }
 }
