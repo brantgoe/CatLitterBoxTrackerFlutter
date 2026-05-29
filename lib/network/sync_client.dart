@@ -35,6 +35,11 @@ class SyncClient {
   StreamSubscription<void>? _outboxSub;
   Timer? _reconnectTimer;
   bool _draining = false;
+
+  /// (master_clock − local_clock) at the moment the welcome arrived.
+  /// Outgoing upsert payloads have their `updatedAt` shifted by this amount
+  /// so LWW comparisons on the master use the master's notion of "now".
+  int _clockSkewMs = 0;
   int _reconnectAttempts = 0;
   bool _stopped = false;
 
@@ -121,7 +126,11 @@ class SyncClient {
       final type = m['type'] as String?;
       switch (type) {
         case MsgType.welcome:
-          // Nothing to do for now; could capture serverTime for clock skew.
+          final serverTime = (m['serverTime'] as num?)?.toInt();
+          if (serverTime != null) {
+            _clockSkewMs =
+                serverTime - DateTime.now().millisecondsSinceEpoch;
+          }
           break;
         case MsgType.reject:
           errorMessage.value =
@@ -169,11 +178,19 @@ class SyncClient {
         for (final ev in batch) {
           Map<String, dynamic> msg;
           if (ev.op == OutboxOp.upsert) {
+            // Shift updatedAt into master time so LWW on the receiving side
+            // compares apples to apples regardless of the two devices'
+            // wall-clock drift.
+            final data = Map<String, dynamic>.from(ev.payload!);
+            if (data['updatedAt'] is num) {
+              data['updatedAt'] =
+                  (data['updatedAt'] as num).toInt() + _clockSkewMs;
+            }
             msg = {
               'type': MsgType.upsert,
               'entity': ev.kind.wire,
               'originDeviceId': deviceId,
-              'data': ev.payload!,
+              'data': data,
             };
           } else {
             msg = SyncMessages.delete(

@@ -111,6 +111,11 @@ class SyncOutbox extends Table {
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(driftDatabase(name: 'litter_tracker'));
 
+  /// Test-only: build the database against a caller-supplied executor
+  /// (e.g. NativeDatabase.memory()) so unit tests don't touch the file
+  /// system.
+  AppDatabase.withExecutor(super.executor);
+
   @override
   int get schemaVersion => 4;
 
