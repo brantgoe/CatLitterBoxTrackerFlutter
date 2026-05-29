@@ -376,6 +376,74 @@ class _BoxConfigScreenState extends ConsumerState<BoxConfigScreen> {
   Future<void> _saveAndExit(Repository repo) async {
     final box = _box;
     if (box == null) return;
+
+    // Switching from automatic to manual scoop hides the maintenance list
+    // section, but the preset items stay in the database and keep firing.
+    // Offer to remove leftover preset items so the box doesn't drag forever
+    // along the "deep clean drum" item it can no longer reach.
+    if (box.typeKind == BoxTypeKind.automatic &&
+        _type == BoxTypeKind.manualScoop) {
+      final previousPreset = BoxPresets.match(box.brand, box.model);
+      if (previousPreset.maintenanceItems.isNotEmpty) {
+        final tasks = await repo.db.tasksForBoxOnce(widget.boxId);
+        final leftover = tasks.where((t) {
+          final n = t.name.trim().toLowerCase();
+          return previousPreset.maintenanceItems
+              .any((p) => p.name.trim().toLowerCase() == n);
+        }).toList();
+        if (leftover.isNotEmpty) {
+          if (!mounted) return;
+          final choice = await showDialog<_PresetCleanupChoice>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Remove preset items?'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Switching to manual scoop. You have ${leftover.length} '
+                    'maintenance item(s) from the '
+                    '"${previousPreset.displayName}" preset:',
+                  ),
+                  const SizedBox(height: 6),
+                  for (final t in leftover) Text('• ${t.name}'),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Items you added yourself are kept either way.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pop(ctx, _PresetCleanupChoice.cancel),
+                  child: const Text('CANCEL'),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pop(ctx, _PresetCleanupChoice.keep),
+                  child: const Text('KEEP'),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pop(ctx, _PresetCleanupChoice.remove),
+                  child: const Text('REMOVE'),
+                ),
+              ],
+            ),
+          );
+          if (choice == null || choice == _PresetCleanupChoice.cancel) return;
+          if (choice == _PresetCleanupChoice.remove) {
+            for (final t in leftover) {
+              await repo.deleteMaintenanceTask(t);
+            }
+          }
+        }
+      }
+    }
+
     final name = _nameCtrl.text.trim().isEmpty ? box.name : _nameCtrl.text.trim();
     final warnDays = int.tryParse(_warnCtrl.text) ?? _hoursToDays(box.warnThresholdHours);
     final overdueDays = int.tryParse(_overdueCtrl.text) ??
@@ -395,6 +463,8 @@ class _BoxConfigScreenState extends ConsumerState<BoxConfigScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 }
+
+enum _PresetCleanupChoice { cancel, keep, remove }
 
 class _MaintenanceList extends ConsumerWidget {
   const _MaintenanceList({required this.boxId, required this.onEdit});
