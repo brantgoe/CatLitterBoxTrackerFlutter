@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:network_info_plus/network_info_plus.dart';
+
 import '../data/database.dart';
 import '../data/repository.dart';
+import 'master_foreground_service.dart';
 import 'network_preferences.dart';
 import 'sync_applier.dart';
 import 'sync_client.dart';
@@ -134,15 +137,32 @@ class SyncEngine {
       );
       await server.start();
       _server = server;
+
+      // Resolve the LAN IP for the persistent notification text.
+      String hostText = ':${cfg.masterPort}';
+      try {
+        final ip = await NetworkInfo().getWifiIP();
+        if (ip != null && ip.isNotEmpty) hostText = '$ip:${cfg.masterPort}';
+      } catch (_) {}
+
+      await MasterForegroundService.instance.start(
+        hostAndPort: hostText,
+        clients: 0,
+      );
+
       server.connectedClients.addListener(() {
-        status.value = status.value.copyWith(
-          connectedClientCount: server.connectedClients.value,
+        final count = server.connectedClients.value;
+        status.value = status.value.copyWith(connectedClientCount: count);
+        // Keep the persistent notification's client count in sync.
+        MasterForegroundService.instance.updateClientCount(
+          hostAndPort: hostText,
+          clients: count,
         );
       });
       status.value = SyncEngineStatus(
         role: cfg.role,
         status: SyncStatus.running,
-        detail: 'Listening on :${cfg.masterPort}',
+        detail: 'Listening on $hostText',
         connectedClientCount: 0,
       );
     } catch (e) {
@@ -205,6 +225,9 @@ class SyncEngine {
   }
 
   Future<void> _teardown() async {
+    if (_server != null) {
+      await MasterForegroundService.instance.stop();
+    }
     await _server?.stop();
     _server = null;
     await _client?.stop();
