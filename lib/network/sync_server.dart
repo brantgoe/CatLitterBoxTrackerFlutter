@@ -27,6 +27,7 @@ class SyncServer {
     required this.deviceId,
     required this.port,
     required this.accessToken,
+    this.securityContext,
   }) : _applier = SyncApplier(db);
 
   final AppDatabase db;
@@ -34,6 +35,9 @@ class SyncServer {
   final String deviceId;
   final int port;
   final String accessToken;
+
+  /// If non-null, the server listens for `wss://` instead of `ws://`.
+  final SecurityContext? securityContext;
 
   final SyncApplier _applier;
   HttpServer? _httpServer;
@@ -57,6 +61,7 @@ class SyncServer {
       handler,
       InternetAddress.anyIPv4,
       port,
+      securityContext: securityContext,
     );
 
     _outboxSub = repository.outboxWakeup.listen((_) => _drainOutbox());

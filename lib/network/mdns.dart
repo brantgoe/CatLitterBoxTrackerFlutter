@@ -16,6 +16,7 @@ class MdnsAdvertiser {
     required int port,
     required String deviceId,
     bool tls = false,
+    String? fingerprintHex,
   }) async {
     await stop();
     try {
@@ -27,6 +28,8 @@ class MdnsAdvertiser {
           MdnsTxt.proto: _toBytes('$protocolVersion'),
           MdnsTxt.deviceId: _toBytes(deviceId),
           MdnsTxt.tls: _toBytes(tls ? '1' : '0'),
+          if (fingerprintHex != null && fingerprintHex.isNotEmpty)
+            MdnsTxt.fingerprint: _toBytes(fingerprintHex),
         },
       );
       _reg = await register(service);
@@ -53,6 +56,7 @@ class DiscoveredMaster {
     required this.port,
     required this.deviceId,
     required this.tls,
+    required this.fingerprintHex,
   });
 
   final String name;
@@ -64,6 +68,10 @@ class DiscoveredMaster {
 
   /// True iff the master advertised TLS support.
   final bool tls;
+
+  /// Lowercase hex SHA-256 of the master's cert, from the `fp` TXT key.
+  /// Empty if the master is non-TLS or didn't advertise it.
+  final String fingerprintHex;
 }
 
 /// One-shot LAN scan. Returns whatever masters answered within [duration].
@@ -117,6 +125,7 @@ class MdnsScanner {
     final txt = svc.txt ?? const <String, Uint8List?>{};
     final deviceId = _fromBytes(txt[MdnsTxt.deviceId]);
     final tls = _fromBytes(txt[MdnsTxt.tls]) == '1';
+    final fp = _fromBytes(txt[MdnsTxt.fingerprint]);
     final key = deviceId.isNotEmpty ? deviceId : (svc.name ?? '$host:$port');
     sink[key] = DiscoveredMaster(
       name: svc.name ?? 'Cat Litter Master',
@@ -124,6 +133,7 @@ class MdnsScanner {
       port: port,
       deviceId: deviceId,
       tls: tls,
+      fingerprintHex: fp,
     );
   }
 }

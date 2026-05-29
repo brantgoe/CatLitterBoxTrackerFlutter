@@ -264,6 +264,7 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
           'host\'s.',
           style: TextStyle(color: AppColors.textSecondary),
         ),
+        if (cfg.pinnedFingerprint.isNotEmpty) _pinCard(cfg),
         const SizedBox(height: 12),
         TextField(
           controller: _hostCtrl,
@@ -399,11 +400,15 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
       return;
     }
     final notifier = ref.read(networkConfigProvider.notifier);
+    // Changing host invalidates any pin we had for the old host. Same host
+    // keeps the pin so we still detect a cert swap.
+    final clearPin = host != cfg.masterHost;
     await notifier.update(cfg.copyWith(
       role: DeviceRole.standalone,
       masterHost: host,
       masterPort: port,
       accessToken: token,
+      pinnedFingerprint: clearPin ? '' : cfg.pinnedFingerprint,
     ));
     await Future<void>.delayed(const Duration(milliseconds: 50));
     await notifier.update(cfg.copyWith(
@@ -411,7 +416,80 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
       masterHost: host,
       masterPort: port,
       accessToken: token,
+      pinnedFingerprint: clearPin ? '' : cfg.pinnedFingerprint,
     ));
+  }
+
+  Widget _pinCard(NetworkConfig cfg) {
+    final shortFp = cfg.pinnedFingerprint.length >= 16
+        ? '${cfg.pinnedFingerprint.substring(0, 8)}…${cfg.pinnedFingerprint.substring(cfg.pinnedFingerprint.length - 8)}'
+        : cfg.pinnedFingerprint;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Card(
+        color: AppColors.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              const Icon(Icons.lock_outline,
+                  size: 18, color: AppColors.statusOk),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Encrypted, pinned to host fingerprint',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    Text(
+                      shortFp,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: _forgetPin,
+                child: const Text('FORGET'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _forgetPin() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Forget pinned host fingerprint?'),
+        content: const Text(
+            'This tablet will accept whatever certificate the host presents '
+            'on the next connection. Only do this if you know the host\'s '
+            'certificate legitimately changed (e.g. the host tablet was '
+            'reinstalled).'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('CANCEL')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('FORGET')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final cfg = ref.read(networkConfigProvider);
+    await ref
+        .read(networkConfigProvider.notifier)
+        .update(cfg.copyWith(pinnedFingerprint: ''));
   }
 
   Future<void> _scanForMaster() async {
@@ -460,10 +538,20 @@ class _NetworkSettingsScreenState extends ConsumerState<NetworkSettingsScreen> {
       _hostCtrl.text = picked.host;
       _portCtrl.text = picked.port.toString();
     });
+    // If the master advertised its cert fingerprint, pre-pin it now so the
+    // first connection is verified end-to-end rather than TOFU-blind.
+    if (picked.fingerprintHex.isNotEmpty) {
+      final cfg = ref.read(networkConfigProvider);
+      if (cfg.pinnedFingerprint != picked.fingerprintHex) {
+        await ref.read(networkConfigProvider.notifier).update(
+              cfg.copyWith(pinnedFingerprint: picked.fingerprintHex),
+            );
+      }
+    }
     messenger.showSnackBar(
       SnackBar(
         content: Text('Filled in ${picked.host}:${picked.port}. '
-            'Enter the access code from the master tablet and tap Connect.'),
+            'Enter the access code from the host tablet and tap Connect.'),
         duration: const Duration(seconds: 4),
       ),
     );

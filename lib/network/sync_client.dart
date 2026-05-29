@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -13,6 +14,23 @@ import 'sync_protocol.dart';
 
 enum ClientState { disconnected, connecting, connected, error }
 
+/// Result of a single connection attempt. The engine uses these to surface
+/// "first time you've connected to this host — saved its fingerprint" or
+/// "the host's cert changed — refusing to connect" to the UI.
+enum PinDecision {
+  /// No saved pin. Accepted whatever cert the host presented and saved its
+  /// fingerprint as the new pin.
+  trustOnFirstUse,
+
+  /// Saved pin matched the live cert. Normal happy-path connection.
+  matched,
+
+  /// Saved pin did NOT match the live cert. Connection was rejected.
+  /// The user must either Forget Pin (and verify out-of-band) or restore the
+  /// original host.
+  mismatch,
+}
+
 class SyncClient {
   SyncClient({
     required this.db,
@@ -21,6 +39,8 @@ class SyncClient {
     required this.host,
     required this.port,
     required this.accessToken,
+    required this.pinnedFingerprint,
+    required this.onPinDecision,
   }) : _applier = SyncApplier(db);
 
   final AppDatabase db;
@@ -29,6 +49,14 @@ class SyncClient {
   final String host;
   final int port;
   final String accessToken;
+
+  /// Saved pin to compare against. Empty means "no pin yet — TOFU".
+  final String pinnedFingerprint;
+
+  /// Called when a connection completes its TLS handshake. The engine uses
+  /// the (decision, newFingerprint) tuple to persist the pin or alert the
+  /// user about a mismatch.
+  final void Function(PinDecision decision, String fingerprint) onPinDecision;
 
   final SyncApplier _applier;
   WebSocketChannel? _channel;
@@ -71,10 +99,53 @@ class SyncClient {
     state.value = ClientState.connecting;
     errorMessage.value = null;
     try {
-      final uri = Uri.parse('ws://$host:$port/ws');
-      final socket = await WebSocket.connect(uri.toString())
-          .timeout(const Duration(seconds: 5));
-      _channel = IOWebSocketChannel(socket);
+      String? seenFp;
+      var pinMismatch = false;
+      final httpClient = HttpClient(context: SecurityContext(withTrustedRoots: false))
+        ..badCertificateCallback = (cert, _, _) {
+          final fp = sha256
+              .convert(cert.der)
+              .bytes
+              .map((b) => b.toRadixString(16).padLeft(2, '0'))
+              .join();
+          seenFp = fp;
+          if (pinnedFingerprint.isEmpty) {
+            return true; // TOFU — caller will persist
+          }
+          if (fp == pinnedFingerprint) return true;
+          pinMismatch = true;
+          return false;
+        };
+
+      final uri = Uri.parse('wss://$host:$port/ws');
+      _channel = IOWebSocketChannel.connect(
+        uri,
+        customClient: httpClient,
+        connectTimeout: const Duration(seconds: 6),
+      );
+      // Force the handshake to actually run so badCertificateCallback fires
+      // and we get a real error if the pin doesn't match.
+      await _channel!.ready;
+
+      if (pinMismatch) {
+        onPinDecision(PinDecision.mismatch, seenFp ?? '');
+        errorMessage.value =
+            "Host's TLS certificate changed since the last time you "
+            "connected. Refusing to connect. If this is expected, tap "
+            "Forget pin in network settings and reconnect.";
+        await _channel?.sink.close();
+        _channel = null;
+        state.value = ClientState.error;
+        return;
+      }
+      if (seenFp != null) {
+        onPinDecision(
+          pinnedFingerprint.isEmpty
+              ? PinDecision.trustOnFirstUse
+              : PinDecision.matched,
+          seenFp!,
+        );
+      }
 
       _channel!.sink.add(jsonEncode(SyncMessages.hello(
         deviceId: deviceId,

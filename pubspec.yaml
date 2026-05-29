@@ -54,6 +54,8 @@ dependencies:
     path: ../cat_litter_protocol
   flutter_foreground_task: ^9.2.2
   nsd: ^5.0.1
+  basic_utils: ^5.8.2
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:

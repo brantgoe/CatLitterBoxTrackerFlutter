@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -6,6 +8,7 @@ import 'package:network_info_plus/network_info_plus.dart';
 
 import '../data/database.dart';
 import '../data/repository.dart';
+import 'master_cert.dart';
 import 'master_foreground_service.dart';
 import 'mdns.dart';
 import 'network_preferences.dart';
@@ -129,12 +132,20 @@ class SyncEngine {
       return; // _onPrefsChanged will re-fire _applyConfig with the new token.
     }
     try {
+      // Self-signed TLS. Generated on first run, persisted to app-private
+      // storage so the fingerprint is stable across restarts.
+      final cert = await ensureMasterCert();
+      final ctx = SecurityContext(withTrustedRoots: false);
+      ctx.useCertificateChainBytes(utf8.encode(cert.certPem));
+      ctx.usePrivateKeyBytes(utf8.encode(cert.keyPem));
+
       final server = SyncServer(
         db: db,
         repository: repository,
         deviceId: cfg.deviceId,
         port: cfg.masterPort,
         accessToken: cfg.accessToken,
+        securityContext: ctx,
       );
       await server.start();
       _server = server;
@@ -150,11 +161,14 @@ class SyncEngine {
         hostAndPort: hostText,
         clients: 0,
       );
-      // Advertise the master over mDNS so clients/companion can auto-find it.
+      // Advertise the master over mDNS so clients/companion can auto-find it,
+      // including the cert fingerprint so they can pin without prompting.
       // Fire-and-forget — registration failure shouldn't kill the server.
       unawaited(MdnsAdvertiser.instance.start(
         port: cfg.masterPort,
         deviceId: cfg.deviceId,
+        tls: true,
+        fingerprintHex: cert.fingerprintHex,
       ));
 
       server.connectedClients.addListener(() {
@@ -199,6 +213,19 @@ class SyncEngine {
         host: cfg.masterHost,
         port: cfg.masterPort,
         accessToken: cfg.accessToken,
+        pinnedFingerprint: cfg.pinnedFingerprint,
+        onPinDecision: (decision, fingerprint) {
+          if (decision == PinDecision.trustOnFirstUse &&
+              fingerprint.isNotEmpty) {
+            // Save the pin so a future cert swap is detected.
+            final current = prefs.value;
+            if (current.pinnedFingerprint != fingerprint) {
+              unawaited(prefs.update(
+                current.copyWith(pinnedFingerprint: fingerprint),
+              ));
+            }
+          }
+        },
       );
       client.state.addListener(() {
         status.value = status.value.copyWith(

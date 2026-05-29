@@ -12,6 +12,7 @@ class NetworkConfig {
     required this.ownedRoomId,
     required this.deviceId,
     required this.accessToken,
+    required this.pinnedFingerprint,
   });
 
   final DeviceRole role;
@@ -26,6 +27,11 @@ class NetworkConfig {
   /// "no auth required" — set on legacy installs that pre-dated this feature.
   final String accessToken;
 
+  /// SHA-256 of the host's self-signed cert as lowercase hex. Empty means
+  /// "no pin recorded yet — accept the first cert we see and store it
+  /// (trust-on-first-use)."
+  final String pinnedFingerprint;
+
   NetworkConfig copyWith({
     DeviceRole? role,
     String? masterHost,
@@ -33,6 +39,7 @@ class NetworkConfig {
     Object? ownedRoomId = _sentinel,
     String? deviceId,
     String? accessToken,
+    String? pinnedFingerprint,
   }) {
     return NetworkConfig(
       role: role ?? this.role,
@@ -43,6 +50,7 @@ class NetworkConfig {
           : ownedRoomId as int?,
       deviceId: deviceId ?? this.deviceId,
       accessToken: accessToken ?? this.accessToken,
+      pinnedFingerprint: pinnedFingerprint ?? this.pinnedFingerprint,
     );
   }
 }
@@ -60,6 +68,7 @@ class NetworkPreferences {
   static const _kOwnedRoomId = 'net_owned_room_id';
   static const _kDeviceId = 'net_device_id';
   static const _kAccessToken = 'net_access_token';
+  static const _kPinnedFingerprint = 'net_pinned_fingerprint';
   static const defaultPort = 4421;
 
   final SharedPreferences _prefs;
@@ -76,6 +85,7 @@ class NetworkPreferences {
         ownedRoomId: null,
         deviceId: '',
         accessToken: '',
+        pinnedFingerprint: '',
       );
 
   /// Generate a short, human-typable shared secret (6 chars, base32-ish).
@@ -112,6 +122,7 @@ class NetworkPreferences {
       ownedRoomId: ownedRoomId,
       deviceId: deviceId,
       accessToken: _prefs.getString(_kAccessToken) ?? '',
+      pinnedFingerprint: _prefs.getString(_kPinnedFingerprint) ?? '',
     );
   }
 
@@ -126,6 +137,7 @@ class NetworkPreferences {
     }
     await _prefs.setString(_kDeviceId, config.deviceId);
     await _prefs.setString(_kAccessToken, config.accessToken);
+    await _prefs.setString(_kPinnedFingerprint, config.pinnedFingerprint);
     _config.value = config;
   }
 }
